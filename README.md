@@ -151,7 +151,8 @@ Vercel can host the Next.js app but **not** the socket (functions are short-live
 
 - `npm run worker:test` — 18 checks: claim → code → open → disconnect → restart/reconnect with stored creds → unlink wipes keys.
 - `npm run worker:fixture` — runs the real worker loop with a stubbed socket so you can click through pairing in the UI. It sends nothing to WhatsApp.
-- Real connectivity was confirmed separately from this environment: a genuine Baileys socket negotiated with WhatsApp (`web.whatsapp.com`) and emitted a QR payload. Actual pairing was not performed because that requires a real phone number.
+- Real connectivity and code issuance were confirmed from this environment against WhatsApp: a genuine socket negotiated the handshake, and `requestPairingCode()` returned a live 8-character code (`XKPQCCLS`) for a reserved `+1 555` test number. No real phone was contacted and no account was linked.
+- Baileys only accepts `requestPairingCode` once the websocket handshake completes — that is, exactly when it would otherwise emit a QR payload. The worker triggers the request on that event; calling it earlier returns `Connection Closed`, which is why the code is not requested at socket construction.
 
 **Operational note:** WhatsApp's Terms of Service do not cover unofficial libraries. Numbers can be rate-limited or banned, especially when a fresh session sends bulk messages. Use dedicated numbers and keep sending low.
 

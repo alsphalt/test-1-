@@ -92,6 +92,10 @@ async function main() {
 
   /* ------------------------------ pairing code ------------------------------ */
   await worker.reconcile();
+  await new Promise((r) => setTimeout(r, 150));
+  // Baileys hands the socket a QR challenge once the handshake completes; the
+  // worker converts exactly that moment into a pairing-code request.
+  await sockets[0].emit("connection.update", { qr: "2@fake-qr-payload" });
   await new Promise((r) => setTimeout(r, 200));
 
   let row = await prisma.whatsAppSession.findUniqueOrThrow({

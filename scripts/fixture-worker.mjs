@@ -41,6 +41,9 @@ function fakeSocket(state) {
     end: () => clearTimeout(entry.timer),
     logout: async () => clearTimeout(entry.timer),
   };
+  setTimeout(async () => {
+    for (const fn of handlers.get("connection.update") || []) await fn({ qr: "stub-qr" });
+  }, 400);
   return sock;
 }
 

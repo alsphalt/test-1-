@@ -189,7 +189,7 @@ export function createWorker({ prisma, makeSocket, logger = console, workerId = 
     // Persist the identity immediately so a crash mid-pairing can resume.
     await saveCreds().catch((err) => logger.error("[wa] initial creds save failed", err?.message));
     const sock = makeSocket(state);
-    sockets.set(row.id, { sock, saveCreds, wipe });
+    sockets.set(row.id, { sock, saveCreds, wipe, codeRequested: false });
 
     await prisma.whatsAppSession
       .update({ where: { id: row.id }, data: { lastSeenAt: new Date() } })
@@ -211,6 +211,16 @@ export function createWorker({ prisma, makeSocket, logger = console, workerId = 
 
     sock.ev.on("connection.update", async (update) => {
       try {
+        // Baileys only accepts requestPairingCode after the websocket handshake,
+        // which is exactly when it would otherwise emit a QR payload.
+        if (update.qr && !state.creds.registered) {
+          const entry = sockets.get(row.id);
+          if (entry && !entry.codeRequested) {
+            entry.codeRequested = true;
+            await requestCode(row, sock);
+          }
+        }
+
         if (update.connection === "open") {
           const jid = sock.user?.id || "";
           await setStatus(row.id, {
@@ -287,7 +297,6 @@ export function createWorker({ prisma, makeSocket, logger = console, workerId = 
       }
     });
 
-    if (!state.creds.registered) await requestCode(row, sock);
   }
 
   async function reconnect(id) {
