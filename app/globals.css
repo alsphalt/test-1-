@@ -271,7 +271,7 @@ body.locked{overflow:hidden;height:100%}
 .row small{font-size:11.5px;color:#8d8d97;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
 .row .btns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 
-.pill{display:inline-flex;align-items:center;gap:6px;font:700 9.5px 'Orbitron',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.16);color:#c9c9d2}
+.pill{display:inline-flex;align-items:center;gap:6px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 9.5px 'Orbitron',sans-serif;letter-spacing:.12em;text-transform:uppercase;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.16);color:#c9c9d2}
 .pill i{width:5px;height:5px;border-radius:50%;background:currentColor}
 .pill.ONLINE{color:#5cffb0;border-color:rgba(92,255,176,.35)}
 .pill.OFFLINE{color:#8d8d97}

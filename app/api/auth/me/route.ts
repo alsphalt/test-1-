@@ -12,7 +12,7 @@ export const GET = route(async () => {
   const user = await currentUser();
   if (!user) return json({ user: null }, 200);
 
-  const [bots, files, sessions, integrations, online, logs] = await Promise.all([
+  const [bots, files, sessions, integrations, online, logs, wa, waConnected] = await Promise.all([
     prisma.bot.count({ where: { userId: user.id } }),
     prisma.fileAsset.count({ where: { userId: user.id } }),
     prisma.session.count({
@@ -23,6 +23,8 @@ export const GET = route(async () => {
       where: { userId: user.id, status: "ONLINE", lastSeenAt: { gt: new Date(Date.now() - 120_000) } },
     }),
     prisma.botLog.count({ where: { bot: { userId: user.id } } }),
+    prisma.whatsAppSession.count({ where: { userId: user.id } }),
+    prisma.whatsAppSession.count({ where: { userId: user.id, status: "CONNECTED" } }),
   ]);
 
   const me = await prisma.user.findUniqueOrThrow({
@@ -41,7 +43,16 @@ export const GET = route(async () => {
       createdAt: me.createdAt,
       lastLoginAt: me.lastLoginAt,
     },
-    counts: { bots, botsOnline: online, files, sessions, integrations, logs },
+    counts: {
+      bots,
+      botsOnline: online,
+      files,
+      sessions,
+      integrations,
+      logs,
+      whatsapp: wa,
+      whatsappConnected: waConnected,
+    },
   });
 });
 

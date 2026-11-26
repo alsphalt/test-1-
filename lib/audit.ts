@@ -21,6 +21,11 @@ export type AuditAction =
   | "integration.delete"
   | "integration.test"
   | "user.update"
+  | "whatsapp.create"
+  | "whatsapp.pair"
+  | "whatsapp.restart"
+  | "whatsapp.logout"
+  | "whatsapp.delete"
   | "admin.user_update"
   | "admin.user_delete";
 

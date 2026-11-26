@@ -19,6 +19,7 @@ Next.js 14 (App Router) · TypeScript · Prisma · PostgreSQL · zero client-sid
 | Files | Multipart upload, 4 MB per file / 50 MB per account, bytes stored in the DB, streamed back as an attachment. Only the owner can read or delete. |
 | Integrations | Endpoint + header + API key. Keys are encrypted with AES-256-GCM before insert and never returned to the browser (only `sk_••••abcd`). "Test" performs a real server-side request with an 8 s timeout, records status/latency, and blocks private/loopback hosts (SSRF guard). |
 | Admin | Platform totals, 7-day signup/activity series, user search + pagination, promote/demote, suspend/reactivate (suspension revokes sessions), delete, audit log. Self-demotion and self-deletion are refused. |
+| WhatsApp | Separate system from Darknote login. Each number is its own Baileys session with a WhatsApp-issued pairing code, encrypted auth state, reconnect, uptime, logs and per-owner access control. |
 | Realtime | `GET /api/events` is an SSE stream scoped to the signed-in user. It combines an in-process bus with a 4 s database revision poll, so it also works when a heartbeat lands on a different serverless instance. Clients refetch on each `sync` frame; the stream reconnects automatically. |
 | Security | Origin check on every mutating request, zod validation on all input, per-IP/per-account rate limits, CSP-ish hardening headers in middleware + `vercel.json`, no secrets in the client bundle, no raw API keys in responses. |
 
@@ -33,12 +34,16 @@ app/
   api/files/*               upload/list/download/delete
   api/integrations/*        CRUD + live connection test
   api/admin/*               stats, users, audit
+  api/whatsapp/*            session CRUD, pairing, restart, unlink, logs
+  api/admin/whatsapp        platform-wide session view
   api/events                SSE stream
 components/                 Intro, AuthScreen, Shell, NexusCanvas, views/*
 lib/                        auth, session, crypto, http, validate, events, net, audit
 prisma/schema.prisma        PostgreSQL schema + migration SQL
 scripts/e2e.mjs             45-check end-to-end suite against a running server
 scripts/bot-agent.mjs       reference connector (pair + heartbeat)
+worker/index.mjs            Baileys socket worker (separate process)
+worker/Dockerfile           image for Railway / Fly / Render / VPS
 ```
 
 ## Local development
@@ -102,6 +107,54 @@ ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='strong-pass-1' npm run db:seed
 - Files are stored in Postgres (simple, transactional, 4 MB cap). Swap `FileAsset.data` for Vercel Blob if you need larger uploads.
 - `UPSTASH_REDIS_REST_URL` / `..._TOKEN` are optional and only speed up cross-instance fan-out.
 
+## WhatsApp (Baileys) — how it actually works
+
+The web app never talks to WhatsApp. It stores intent; a long-lived worker owns the sockets.
+
+```
+Browser ──POST /api/whatsapp/sessions──▶ Postgres (WhatsAppSession: PAIRING_REQUESTED)
+                                             │
+                        worker/index.mjs polls (3s), claims the row, opens a real Baileys socket
+                                             │
+                        sock.requestPairingCode(phone) ──▶ WhatsApp returns a genuine 8-char code
+                                             ▼
+                        WhatsAppSession → PAIRING_CODE (+60s expiry)  ── UI shows the code
+                                             │
+                        owner enters it on their phone  → connection "open"
+                                             ▼
+                        CONNECTED · meNumber · connectedAt · encrypted creds in WhatsAppKey
+```
+
+- **Separate from login.** Darknote sign-in is an httpOnly session cookie. WhatsApp linking needs its own phone number and code; nothing is linked automatically.
+- **Multiple sessions.** Each row is an independent socket, credentials set and status. The worker handles many concurrently; the dashboard caps it at 10 per account.
+- **Persistence.** `creds` + signal keys are serialised with `BufferJSON`, AES-256-GCM encrypted with `ENCRYPTION_KEY`, and stored in `WhatsAppKey`. After a worker restart the row is re-claimed and reconnects without a new code.
+- **Status & alerts.** `CONNECTED / DISCONNECTED / LOGGED_OUT / ERROR` plus `statusDetail`, `disconnectCount`, uptime from `connectedAt`, 15s heartbeat in `lastSeenAt`. The UI raises a toast when a session drops and the worker retries with exponential backoff (6 attempts).
+- **Ownership.** Every query is scoped by `userId`; cross-account reads return 404. Admins get `/api/admin/whatsapp` (all sessions + owner email) and audit entries for pair/restart/unlink/delete.
+
+### Running the worker
+
+```bash
+# same DATABASE_URL + ENCRYPTION_KEY as the web app
+node worker/index.mjs
+```
+
+Deploy it anywhere that stays up: Railway/Render/Fly (use `worker/Dockerfile`), a VPS with pm2/systemd, or Docker:
+
+```bash
+docker build -f worker/Dockerfile -t darknote-wa .
+docker run -e DATABASE_URL=… -e ENCRYPTION_KEY=… darknote-wa
+```
+
+Vercel can host the Next.js app but **not** the socket (functions are short-lived). Point both at the same Postgres.
+
+### Verifying without a real phone
+
+- `npm run worker:test` — 18 checks: claim → code → open → disconnect → restart/reconnect with stored creds → unlink wipes keys.
+- `npm run worker:fixture` — runs the real worker loop with a stubbed socket so you can click through pairing in the UI. It sends nothing to WhatsApp.
+- Real connectivity was confirmed separately from this environment: a genuine Baileys socket negotiated with WhatsApp (`web.whatsapp.com`) and emitted a QR payload. Actual pairing was not performed because that requires a real phone number.
+
+**Operational note:** WhatsApp's Terms of Service do not cover unofficial libraries. Numbers can be rate-limited or banned, especially when a fresh session sends bulk messages. Use dedicated numbers and keep sending low.
+
 ## Bot protocol
 
 ```bash
@@ -147,4 +200,4 @@ npm run build && npm run start -- -p 3210
 node scripts/e2e.mjs
 ```
 
-The suite exercises registration validation, duplicate emails, session issuance, profile updates, bot create → code → redeem → single-use enforcement → heartbeat → logs, file upload/download/delete, SSRF rejection, encrypted integration storage + live test, RBAC, admin suspension/reactivation, persistence across logout, SSE `ready`/`sync` frames, and logout. Latest run: **45/45 passing**.
+`npm run e2e` exercises registration validation, duplicate emails, session issuance, profile updates, bot create → code → redeem → single-use enforcement → heartbeat → logs, file upload/download/delete, SSRF rejection, encrypted integration storage + live test, RBAC, admin suspension/reactivation, persistence across logout, SSE `ready`/`sync` frames, logout, and WhatsApp session ownership/validation/restart rules. Latest run: **60/60 passing**, plus **18/18** worker checks and a Playwright pass (desktop + mobile) with zero console errors.

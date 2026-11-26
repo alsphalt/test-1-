@@ -18,6 +18,42 @@ export type Counts = {
   sessions: number;
   integrations: number;
   logs: number;
+  whatsapp?: number;
+  whatsappConnected?: number;
+};
+
+export type WaStatus =
+  | "PAIRING_REQUESTED"
+  | "PAIRING_CODE"
+  | "CONNECTING"
+  | "CONNECTED"
+  | "DISCONNECTED"
+  | "RECONNECT_REQUESTED"
+  | "LOGGED_OUT"
+  | "ERROR";
+
+export type WaSession = {
+  id: string;
+  label: string;
+  phone: string;
+  prettyPhone: string;
+  status: WaStatus;
+  statusLabel: string;
+  statusDetail: string;
+  pairingCode: string;
+  pairingExpiresAt: string | null;
+  pairingSecondsLeft: number;
+  meJid: string;
+  meNumber: string;
+  platform: string;
+  connectedAt: string | null;
+  lastSeenAt: string | null;
+  uptimeSeconds: number;
+  disconnectCount: number;
+  workerLive: boolean;
+  logCount?: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type MeResponse = { user: Me | null; counts?: Counts };

@@ -20,6 +20,7 @@ export type NexusEvent = {
     | "file.deleted"
     | "integration.updated"
     | "user.updated"
+    | "whatsapp.updated"
     | "sync"
     | "ping";
   at: number;

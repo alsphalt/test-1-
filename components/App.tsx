@@ -6,6 +6,7 @@ import Intro from "./Intro";
 import Shell, { type View } from "./Shell";
 import Overview from "./views/Overview";
 import Bots from "./views/Bots";
+import WhatsApp from "./views/WhatsApp";
 import Files from "./views/Files";
 import Integrations from "./views/Integrations";
 import Admin from "./views/Admin";
@@ -160,6 +161,7 @@ function Nexus() {
     <Shell me={me} counts={counts} view={view} onView={setView} onMe={setMe} onLogout={logout} live={live}>
       {view === "overview" && <Overview me={me} counts={counts} tick={tick} onView={setView} />}
       {view === "bots" && <Bots tick={tick} />}
+      {view === "whatsapp" && <WhatsApp tick={tick} />}
       {view === "files" && <Files tick={tick} />}
       {view === "integrations" && <Integrations tick={tick} />}
       {view === "admin" && (me.role === "ADMIN" ? <Admin me={me} tick={tick} /> : <div className="panel">Administrator access required.</div>)}

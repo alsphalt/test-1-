@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Pill, ago, clock, SectionEmpty } from "../ui";
-import type { Bot, BotLog, Counts, Me } from "../types";
+import type { Bot, BotLog, Counts, Me, WaSession } from "../types";
 import type { View } from "../Shell";
 
 export default function Overview({
@@ -19,6 +19,7 @@ export default function Overview({
 }) {
   const [bots, setBots] = useState<Bot[]>([]);
   const [logs, setLogs] = useState<BotLog[]>([]);
+  const [wa, setWa] = useState<WaSession[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -26,11 +27,13 @@ export default function Overview({
     Promise.all([
       api.get<{ bots: Bot[] }>("/api/bots"),
       api.get<{ logs: BotLog[] }>("/api/logs?limit=40"),
+      api.get<{ sessions: WaSession[] }>("/api/whatsapp/sessions").catch(() => ({ sessions: [] as WaSession[] })),
     ])
-      .then(([b, l]) => {
+      .then(([b, l, w]) => {
         if (!alive) return;
         setBots(b.bots);
         setLogs(l.logs);
+        setWa(w.sessions);
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
@@ -141,8 +144,11 @@ export default function Overview({
               <b>{errors.toLocaleString()}</b>
             </div>
             <div className="stat">
-              <span>Files</span>
-              <b>{counts?.files ?? 0}</b>
+              <span>WhatsApp</span>
+              <b>
+                {wa.filter((s) => s.status === "CONNECTED").length}
+                <small>/ {wa.length} linked</small>
+              </b>
             </div>
           </div>
 
@@ -214,6 +220,32 @@ export default function Overview({
                 View all {bots.length}
               </button>
             )}
+          </section>
+
+          <section className="panel">
+            <h4>
+              WhatsApp <em>{wa.filter((s) => s.status === "CONNECTED").length}/{wa.length}</em>
+            </h4>
+            {wa.length === 0 ? (
+              <SectionEmpty>No numbers linked. Pairing is separate from your Darknote login.</SectionEmpty>
+            ) : (
+              <div className="rows">
+                {wa.slice(0, 4).map((s) => (
+                  <div className="row" key={s.id}>
+                    <div className="grow">
+                      <b>{s.label}</b>
+                      <small>
+                        {s.prettyPhone} · {s.statusDetail && s.status === "DISCONNECTED" ? s.statusDetail : s.statusLabel}
+                      </small>
+                    </div>
+                    <Pill value={s.status === "CONNECTED" ? "ONLINE" : s.status === "LOGGED_OUT" ? "OFFLINE" : s.status} />
+                  </div>
+                ))}
+              </div>
+            )}
+            <button className="btn sm" style={{ marginTop: 10 }} onClick={() => onView("whatsapp")}>
+              Manage WhatsApp
+            </button>
           </section>
 
           <section className="panel">

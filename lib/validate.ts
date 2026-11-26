@@ -39,6 +39,17 @@ export const profileUpdateSchema = z
   })
   .refine((v) => Object.keys(v).length > 0, "Nothing to update");
 
+export const whatsappCreateSchema = z.object({
+  label: z.string().trim().min(2, "Give the session a name").max(60, "Name is too long"),
+  phone: z
+    .string()
+    .trim()
+    .min(8, "Enter the full international number")
+    .max(20)
+    .transform((v) => v.replace(/[^\d]/g, "").replace(/^0+/, ""))
+    .refine((v) => /^[1-9]\d{7,14}$/.test(v), "Use the international format, e.g. 447700900123"),
+});
+
 export const botCreateSchema = z.object({
   name: z.string().trim().min(2, "Name is too short").max(60).default("New bot"),
   description: z.string().trim().max(300).default(""),

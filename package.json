@@ -10,10 +10,14 @@
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "db:seed": "node prisma/seed.mjs",
-    "e2e": "node scripts/e2e.mjs"
+    "e2e": "node scripts/e2e.mjs",
+    "worker": "node worker/index.mjs",
+    "worker:test": "node scripts/test-worker.mjs",
+    "worker:fixture": "node scripts/fixture-worker.mjs"
   },
   "dependencies": {
     "@prisma/client": "5.22.0",
+    "@whiskeysockets/baileys": "^6.7.24",
     "bcryptjs": "2.4.3",
     "jose": "5.9.6",
     "next": "14.2.18",

@@ -36,11 +36,12 @@ export async function GET(req: Request) {
   let lifetime: ReturnType<typeof setTimeout> | null = null;
 
   const revision = async (): Promise<string> => {
-    const [bots, logs, files, integrations] = await Promise.all([
+    const [bots, logs, files, integrations, wa] = await Promise.all([
       prisma.bot.aggregate({ where: { userId: me.id }, _max: { updatedAt: true } }),
       prisma.botLog.count({ where: { bot: { userId: me.id } } }),
       prisma.fileAsset.count({ where: { userId: me.id } }),
       prisma.integration.aggregate({ where: { userId: me.id }, _max: { lastTestAt: true }, _count: true }),
+      prisma.whatsAppSession.aggregate({ where: { userId: me.id }, _max: { updatedAt: true }, _count: true }),
     ]);
     return [
       bots._max.updatedAt?.getTime() ?? 0,
@@ -48,6 +49,8 @@ export async function GET(req: Request) {
       files,
       integrations._count ?? 0,
       integrations._max.lastTestAt?.getTime() ?? 0,
+      wa._max.updatedAt?.getTime() ?? 0,
+      wa._count ?? 0,
     ].join(":");
   };
 

@@ -24,6 +24,7 @@ model User {
   lastLoginAt  DateTime?
 
   sessions     Session[]
+  whatsapp     WhatsAppSession[]
   notes        Note[]
   bots         Bot[]
   files        FileAsset[]
@@ -147,4 +148,53 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([userId])
+}
+
+model WhatsAppSession {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label           String
+  phone           String    @default("") // digits only, E.164 without +
+  status          String    @default("PAIRING_REQUESTED")
+  // PAIRING_REQUESTED | PAIRING_CODE | CONNECTING | CONNECTED | DISCONNECTED
+  // RECONNECT_REQUESTED | LOGGED_OUT | ERROR
+  statusDetail    String    @default("")
+  pairingCode     String    @default("")
+  pairingExpiresAt DateTime?
+  meJid           String    @default("")
+  meNumber        String    @default("")
+  platform        String    @default("")
+  connectedAt     DateTime?
+  lastSeenAt      DateTime?
+  disconnectCount Int       @default(0)
+  workerId        String    @default("")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  keys WhatsAppKey[]
+  logs WhatsAppLog[]
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model WhatsAppKey {
+  sessionId String
+  keyId     String
+  value     String // AES-256-GCM ciphertext of BufferJSON-serialised auth data
+  session   WhatsAppSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@id([sessionId, keyId])
+}
+
+model WhatsAppLog {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   WhatsAppSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  level     String   @default("INFO")
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, createdAt])
 }

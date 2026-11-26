@@ -28,6 +28,7 @@ function check(name, condition, detail = "") {
 function jar() {
   const cookies = new Map();
   return {
+    ip: `203.0.113.${Math.floor(Math.random() * 250) + 1}`,
     header() {
       return [...cookies.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
     },
@@ -45,9 +46,11 @@ function jar() {
   };
 }
 
-async function req(method, path, { body, cookie, token, form } = {}) {
+async function req(method, path, { body, cookie, token, form, ip } = {}) {
   const headers = {};
   if (cookie) headers.cookie = cookie;
+  // Distinct simulated client IPs keep per-IP rate limits from tripping between runs.
+  headers["x-forwarded-for"] = ip || RUN_IP;
   if (token) headers.authorization = `Bearer ${token}`;
   let payload;
   if (form) payload = form;
@@ -65,6 +68,8 @@ async function req(method, path, { body, cookie, token, form } = {}) {
 }
 
 const stamp = Date.now().toString(36);
+// One simulated client IP per run so per-IP limits do not leak between runs.
+const RUN_IP = `198.51.100.${Math.floor(Math.random() * 250) + 1}`;
 const userEmail = `operator.${stamp}@nexus.test`;
 const userPassword = "OperatorPass123";
 
@@ -73,7 +78,7 @@ async function main() {
 
   /* ------------------------------- auth basics ------------------------------ */
   const anon = jar();
-  let r = await req("GET", "/api/auth/me", { cookie: anon.header() });
+  let r = await req("GET", "/api/auth/me", { cookie: anon.header(), ip: anon.ip });
   check("unauthenticated /me returns null", r.status === 200 && r.data.user === null);
 
   r = await req("POST", "/api/auth/register", {
@@ -90,7 +95,7 @@ async function main() {
   r = await req("POST", "/api/auth/register", { body: { name: "Operator One", email: userEmail, password: userPassword } });
   check("duplicate email rejected (409)", r.status === 409, `got ${r.status}`);
 
-  r = await req("GET", "/api/auth/me", { cookie: user.header() });
+  r = await req("GET", "/api/auth/me", { cookie: user.header(), ip: user.ip });
   check("session resolves to the stored account", r.data?.user?.email === userEmail);
   check("account counts are server-side", typeof r.data?.counts?.bots === "number");
 
@@ -103,7 +108,7 @@ async function main() {
   check("bot created", r.status === 201 && Boolean(botId));
   check("new bot starts unpaired/offline", r.data?.bot?.paired === false && r.data?.bot?.status === "OFFLINE");
 
-  r = await req("POST", `/api/bots/${botId}/pair`, { cookie: user.header() });
+  r = await req("POST", `/api/bots/${botId}/pair`, { cookie: user.header(), ip: user.ip });
   const code = r.data?.code;
   check("pairing code issued (8 chars)", r.status === 200 && typeof code === "string" && code.length === 8);
 
@@ -123,15 +128,15 @@ async function main() {
   r = await req("POST", "/api/bots/heartbeat", { token: "dnx_not-a-real-token", body: { status: "ONLINE" } });
   check("invalid bot token rejected (401)", r.status === 401, `got ${r.status}`);
 
-  r = await req("GET", `/api/bots/${botId}`, { cookie: user.header() });
+  r = await req("GET", `/api/bots/${botId}`, { cookie: user.header(), ip: user.ip });
   check("bot detail shows ONLINE + counters", r.data?.bot?.status === "ONLINE" && r.data?.bot?.messagesSent === 42);
   check("heartbeat produced log rows", Array.isArray(r.data?.recent) && r.data.recent.length >= 1);
 
-  r = await req("GET", "/api/logs?limit=20", { cookie: user.header() });
+  r = await req("GET", "/api/logs?limit=20", { cookie: user.header(), ip: user.ip });
   check("global log feed returns bot lines", Array.isArray(r.data?.logs) && r.data.logs.length >= 1);
 
   /* ---------------------------------- files -------------------------------- */
-  r = await req("GET", "/api/files", { cookie: user.header() });
+  r = await req("GET", "/api/files", { cookie: user.header(), ip: user.ip });
   check("file listing starts empty", r.data?.files?.length === 0 && r.data?.quotaBytes > 0);
 
   const bytes = new TextEncoder().encode("darknote e2e payload");
@@ -141,7 +146,7 @@ async function main() {
   const fileId = r.data?.file?.id;
   check("upload stores the file", r.status === 201 && Boolean(fileId));
 
-  const dl = await fetch(`${BASE}/api/files/${fileId}`, { headers: { cookie: user.header() } });
+  const dl = await fetch(`${BASE}/api/files/${fileId}`, { headers: { cookie: user.header(), ip: user.ip } });
   const text = await dl.text();
   check("download returns identical bytes", dl.status === 200 && text === "darknote e2e payload");
 
@@ -159,18 +164,18 @@ async function main() {
   const integrationId = r.data?.integration?.id;
   check("integration stored without the raw key", r.status === 201 && r.data?.integration?.keyPrefix?.includes("••••"));
 
-  r = await req("GET", "/api/integrations", { cookie: user.header() });
+  r = await req("GET", "/api/integrations", { cookie: user.header(), ip: user.ip });
   check("integration list never leaks the key", JSON.stringify(r.data).includes("secret-key-123") === false);
 
-  r = await req("POST", `/api/integrations/${integrationId}/test`, { cookie: user.header() });
+  r = await req("POST", `/api/integrations/${integrationId}/test`, { cookie: user.header(), ip: user.ip });
   check("integration test performs a server-side call", r.status === 200 && typeof r.data?.ok === "boolean", JSON.stringify(r.data).slice(0, 140));
 
   /* -------------------------------- sessions ------------------------------- */
-  r = await req("GET", "/api/auth/sessions", { cookie: user.header() });
+  r = await req("GET", "/api/auth/sessions", { cookie: user.header(), ip: user.ip });
   check("session list marks the current device", Array.isArray(r.data?.sessions) && r.data.sessions.some((s) => s.current));
 
   /* --------------------------------- RBAC --------------------------------- */
-  r = await req("GET", "/api/admin/stats", { cookie: user.header() });
+  r = await req("GET", "/api/admin/stats", { cookie: user.header(), ip: user.ip });
   check("non-admin blocked from admin stats (403)", r.status === 403, `got ${r.status}`);
 
   /* --------------------------------- admin -------------------------------- */
@@ -183,17 +188,17 @@ async function main() {
   }
   check("admin account available", admin.has("dnx_session"), `status ${r.status}`);
 
-  r = await req("GET", "/api/admin/stats", { cookie: admin.header() });
+  r = await req("GET", "/api/admin/stats", { cookie: admin.header(), ip: admin.ip });
   check("admin stats aggregate real data", r.status === 200 && r.data?.totals?.users >= 2);
 
-  r = await req("GET", `/api/admin/users?q=${encodeURIComponent(userEmail)}`, { cookie: admin.header() });
+  r = await req("GET", `/api/admin/users?q=${encodeURIComponent(userEmail)}`, { cookie: admin.header(), ip: admin.ip });
   const target = r.data?.users?.[0];
   check("admin user search finds the operator", r.status === 200 && target?.email === userEmail);
 
   r = await req("PATCH", `/api/admin/users/${target.id}`, { cookie: admin.header(), body: { status: "SUSPENDED" } });
   check("admin can suspend an account", r.status === 200 && r.data?.user?.status === "SUSPENDED");
 
-  r = await req("GET", "/api/auth/me", { cookie: user.header() });
+  r = await req("GET", "/api/auth/me", { cookie: user.header(), ip: user.ip });
   check("suspension revokes live sessions immediately", r.data?.user === null);
 
   r = await req("POST", "/api/auth/login", { body: { email: userEmail, password: userPassword } });
@@ -206,13 +211,13 @@ async function main() {
   user.absorb(r.res);
   check("reactivated account can log in", r.status === 200);
 
-  r = await req("GET", "/api/bots", { cookie: user.header() });
+  r = await req("GET", "/api/bots", { cookie: user.header(), ip: user.ip });
   check("data survives logout/suspension cycle", r.data?.bots?.length === 1 && r.data.bots[0].id === botId);
 
   /* ---------------------------------- SSE --------------------------------- */
   const controller = new AbortController();
   const sse = await fetch(`${BASE}/api/events`, {
-    headers: { cookie: user.header() },
+    headers: { cookie: user.header(), ip: user.ip },
     signal: controller.signal,
   });
   check("SSE stream opens", sse.status === 200, `got ${sse.status}`);
@@ -261,20 +266,70 @@ async function main() {
     controller.abort();
   }
 
+  /* -------------------------------- whatsapp ------------------------------- */
+  r = await req("POST", "/api/whatsapp/sessions", {
+    cookie: user.header(),
+    body: { label: "Support line", phone: "+44 7700 900123" },
+  });
+  const waId = r.data?.session?.id;
+  check("whatsapp session created", r.status === 201 && Boolean(waId), JSON.stringify(r.data).slice(0, 140));
+  check("phone normalised to digits", r.data?.session?.phone === "447700900123");
+  check("new session waits for a real pairing code", r.data?.session?.status === "PAIRING_REQUESTED" && r.data?.session?.pairingCode === "");
+
+  r = await req("POST", "/api/whatsapp/sessions", { cookie: user.header(), body: { label: "Bad", phone: "123" } });
+  check("invalid phone rejected (422)", r.status === 422, `got ${r.status}`);
+
+  r = await req("GET", "/api/whatsapp/sessions", { cookie: user.header(), ip: user.ip });
+  check("session list is scoped to the owner", r.data?.sessions?.length === 1 && r.data.sessions[0].id === waId);
+
+  // a second account must not see or touch it
+  const other = jar();
+  const otherEmail = `intruder.${stamp}@nexus.test`;
+  r = await req("POST", "/api/auth/register", { body: { name: "Intruder", email: otherEmail, password: "IntruderPass123" } });
+  other.absorb(r.res);
+  r = await req("GET", `/api/whatsapp/sessions/${waId}`, { cookie: other.header(), ip: other.ip });
+  check("another user cannot read the session (404)", r.status === 404, `got ${r.status}`);
+  r = await req("DELETE", `/api/whatsapp/sessions/${waId}`, { cookie: other.header(), ip: other.ip });
+  check("another user cannot delete the session (404)", r.status === 404, `got ${r.status}`);
+  r = await req("POST", `/api/whatsapp/sessions/${waId}/pair`, { cookie: other.header(), ip: other.ip });
+  check("another user cannot trigger pairing (404)", r.status === 404, `got ${r.status}`);
+
+  r = await req("POST", `/api/whatsapp/sessions/${waId}/pair`, { cookie: user.header(), ip: user.ip });
+  check("owner can (re)request a pairing code", r.status === 200 && r.data?.status === "PAIRING_REQUESTED");
+
+  r = await req("POST", `/api/whatsapp/sessions/${waId}/restart`, { cookie: user.header(), ip: user.ip });
+  check("restart before pairing is refused (409)", r.status === 409, `got ${r.status}`);
+
+  r = await req("GET", `/api/whatsapp/sessions/${waId}/logs`, { cookie: user.header(), ip: user.ip });
+  check("session log endpoint responds", r.status === 200 && Array.isArray(r.data?.logs));
+
+  r = await req("GET", "/api/admin/whatsapp", { cookie: user.header(), ip: user.ip });
+  check("non-admin cannot read platform whatsapp data (403)", r.status === 403, `got ${r.status}`);
+
+  r = await req("GET", "/api/admin/whatsapp", { cookie: admin.header(), ip: admin.ip });
+  const adminRow = (r.data?.sessions || []).find((x) => x.id === waId);
+  check("admin sees every session with its owner", r.status === 200 && adminRow?.owner === userEmail, JSON.stringify(adminRow || {}).slice(0, 120));
+
+  r = await req("DELETE", `/api/whatsapp/sessions/${waId}`, { cookie: user.header(), ip: user.ip });
+  check("owner can delete the session", r.status === 200);
+
+  r = await req("GET", "/api/whatsapp/sessions", { cookie: user.header(), ip: user.ip });
+  check("deleted session is gone", r.data?.sessions?.length === 0);
+
   /* -------------------------------- teardown ------------------------------- */
-  r = await req("DELETE", `/api/files/${fileId}`, { cookie: user.header() });
+  r = await req("DELETE", `/api/files/${fileId}`, { cookie: user.header(), ip: user.ip });
   check("file delete works", r.status === 200);
 
-  r = await req("DELETE", `/api/integrations/${integrationId}`, { cookie: user.header() });
+  r = await req("DELETE", `/api/integrations/${integrationId}`, { cookie: user.header(), ip: user.ip });
   check("integration delete works", r.status === 200);
 
-  r = await req("DELETE", `/api/bots/${botId}`, { cookie: user.header() });
+  r = await req("DELETE", `/api/bots/${botId}`, { cookie: user.header(), ip: user.ip });
   check("bot delete works", r.status === 200);
 
-  r = await req("POST", "/api/auth/logout", { cookie: user.header() });
+  r = await req("POST", "/api/auth/logout", { cookie: user.header(), ip: user.ip });
   check("logout succeeds", r.status === 200);
 
-  r = await req("GET", "/api/auth/me", { cookie: user.header() });
+  r = await req("GET", "/api/auth/me", { cookie: user.header(), ip: user.ip });
   check("cookie no longer authenticates", r.data?.user === null);
 
   r = await req("POST", "/api/auth/login", { body: { email: userEmail, password: "WrongPassword123" } });

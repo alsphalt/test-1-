@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { ConfirmButton, Pill, SectionEmpty, ago, fmtBytes, useDebounced, useToast } from "../ui";
-import type { AdminStats, AdminUser, AuditRow, Me } from "../types";
+import type { AdminStats, AdminUser, AuditRow, Me, WaSession } from "../types";
 
 export default function Admin({ me, tick }: { me: Me; tick: number }) {
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -14,6 +14,7 @@ export default function Admin({ me, tick }: { me: Me; tick: number }) {
   const [query, setQuery] = useState("");
   const q = useDebounced(query, 350);
   const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [wa, setWa] = useState<{ sessions: (WaSession & { owner: string })[]; totals: Record<string, number> } | null>(null);
   const [error, setError] = useState("");
   const toast = useToast();
 
@@ -25,6 +26,10 @@ export default function Admin({ me, tick }: { me: Me; tick: number }) {
     api
       .get<{ logs: AuditRow[] }>("/api/admin/audit?limit=20")
       .then((res) => setAudit(res.logs))
+      .catch(() => undefined);
+    api
+      .get<{ sessions: (WaSession & { owner: string })[]; totals: Record<string, number> }>("/api/admin/whatsapp")
+      .then(setWa)
       .catch(() => undefined);
   }, [tick]);
 
@@ -162,6 +167,41 @@ export default function Admin({ me, tick }: { me: Me; tick: number }) {
           )}
         </section>
       </div>
+
+      <section className="panel">
+        <h4>
+          WhatsApp sessions <em>{wa?.sessions.length ?? 0}</em>
+        </h4>
+        {!wa || wa.sessions.length === 0 ? (
+          <SectionEmpty>No WhatsApp sessions on the platform yet.</SectionEmpty>
+        ) : (
+          <>
+            <div className="seg" style={{ marginBottom: 12 }}>
+              {Object.entries(wa.totals).map(([status, count]) => (
+                <span key={status} className="pill">
+                  <i />
+                  {status.toLowerCase()} · {count}
+                </span>
+              ))}
+            </div>
+            <div className="rows">
+              {wa.sessions.slice(0, 12).map((s) => (
+                <div className="row" key={s.id}>
+                  <div className="grow">
+                    <b>
+                      {s.label} <span style={{ color: "#8d8d97", fontWeight: 400 }}>{s.prettyPhone}</span>
+                    </b>
+                    <small>
+                      {s.owner} · created {ago(s.createdAt)} · {s.disconnectCount} disconnects
+                    </small>
+                  </div>
+                  <Pill value={s.status === "CONNECTED" ? "ONLINE" : s.status} />
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
 
       <section className="panel">
         <h4>
