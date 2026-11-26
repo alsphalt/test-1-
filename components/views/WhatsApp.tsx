@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
 import { ConfirmButton, Modal, SectionEmpty, ago, clock, useNow, useToast } from "../ui";
-import type { WaSession } from "../types";
+import type { Bot, WaSession } from "../types";
 
 const STATUS_HINT: Record<string, string> = {
   PAIRING_REQUESTED: "Contacting WhatsApp…",
@@ -52,6 +52,8 @@ function Uptime({ session }: { session: WaSession }) {
 
 export default function WhatsApp({ tick }: { tick: number }) {
   const [sessions, setSessions] = useState<WaSession[]>([]);
+  const [bots, setBots] = useState<Bot[]>([]);
+  const [botId, setBotId] = useState("");
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [label, setLabel] = useState("");
@@ -61,6 +63,13 @@ export default function WhatsApp({ tick }: { tick: number }) {
   const [detailId, setDetailId] = useState<string | null>(null);
   const prev = useRef<Record<string, string>>({});
   const toast = useToast();
+
+  useEffect(() => {
+    api
+      .get<{ bots: Bot[] }>("/api/bots")
+      .then((res) => setBots(res.bots.filter((b) => b.paired && b.enabled)))
+      .catch(() => undefined);
+  }, [tick]);
 
   const load = () => {
     api
@@ -98,10 +107,15 @@ export default function WhatsApp({ tick }: { tick: number }) {
     setBusy(true);
     setError("");
     try {
-      const res = await api.post<{ session: WaSession }>("/api/whatsapp/sessions", { label, phone });
+      const res = await api.post<{ session: WaSession }>("/api/whatsapp/sessions", {
+        label,
+        phone,
+        ...(botId ? { botId } : {}),
+      });
       setCreateOpen(false);
       setLabel("");
       setPhone("");
+      setBotId("");
       setDetailId(res.session.id);
       toast("Session created — WhatsApp is generating a pairing code.", "ok");
       load();
@@ -151,8 +165,8 @@ export default function WhatsApp({ tick }: { tick: number }) {
             WHATSAPP <em>SESSIONS</em>
           </h2>
           <p>
-            Real Baileys sockets. Logging into Darknote never links WhatsApp — every number is paired separately with a
-            code issued by WhatsApp itself.
+            Every number is paired separately with a code WhatsApp issues — either on this server's worker or inside your
+            own bot agent. Signing into Darknote never links WhatsApp.
           </p>
         </div>
         <button className="btn p" onClick={() => setCreateOpen(true)}>
@@ -174,7 +188,7 @@ export default function WhatsApp({ tick }: { tick: number }) {
           <b style={{ color: stats.attention ? "#ff5c7c" : undefined }}>{stats.attention}</b>
         </div>
         <div className="stat">
-          <span>Worker</span>
+          <span>Agent</span>
           <b style={{ fontSize: 15 }}>
             <span className={`pill ${sessions.some((s) => s.workerLive) ? "ONLINE" : "OFFLINE"}`}>
               <i />
@@ -217,11 +231,12 @@ export default function WhatsApp({ tick }: { tick: number }) {
                     {s.label} <span style={{ color: "#8d8d97", fontWeight: 400 }}>{s.prettyPhone}</span>
                   </b>
                   <small>
+                    {s.source === "BOT" ? `via ${s.botName || "bot agent"}` : "via server worker"} ·{" "}
                     {STATUS_HINT[s.status] || s.status} · uptime <Uptime session={s} /> · {s.disconnectCount} disconnects
                     {s.meNumber ? ` · paired as +${s.meNumber}` : ""}
                   </small>
-                  {s.statusDetail && ["DISCONNECTED", "ERROR"].includes(s.status) && (
-                    <small style={{ color: "#ff8fa3" }}>{s.statusDetail}</small>
+                  {(s.pairError || (["DISCONNECTED", "ERROR"].includes(s.status) && s.statusDetail)) && (
+                    <small style={{ color: "#ff8fa3" }}>{s.pairError || s.statusDetail}</small>
                   )}
                 </div>
                 <WaPill status={s.status} />
@@ -257,6 +272,22 @@ export default function WhatsApp({ tick }: { tick: number }) {
           onClose={() => setCreateOpen(false)}
         >
           <div className="form">
+            {bots.length > 0 && (
+              <div>
+                <label htmlFor="wa-bot">Connect through</label>
+                <select id="wa-bot" value={botId} onChange={(e) => setBotId(e.target.value)}>
+                  <option value="">Server worker (this deployment)</option>
+                  {bots.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} · bot agent
+                    </option>
+                  ))}
+                </select>
+                <div className="hint">
+                  Bot agents issue the code from their own WhatsApp connection; the server worker uses this deployment.
+                </div>
+              </div>
+            )}
             <div>
               <label htmlFor="wa-label">Session name</label>
               <input id="wa-label" value={label} maxLength={60} placeholder="Support line" onChange={(e) => setLabel(e.target.value)} />

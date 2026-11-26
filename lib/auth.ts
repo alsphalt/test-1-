@@ -4,6 +4,18 @@ import { createHash, randomBytes } from "crypto";
 import { cookies } from "next/headers";
 import { authSecret, isProd } from "./env";
 
+/**
+ * SameSite mode for the session cookie. Same-origin deployments keep `lax`;
+ * a frontend on another origin needs `none` (which browsers accept only with
+ * Secure, so it is HTTPS-only in practice).
+ */
+export function cookieSameSite(): "lax" | "strict" | "none" {
+  const raw = (process.env.COOKIE_SAMESITE || "lax").toLowerCase();
+  if (raw === "none" || raw === "strict") return raw;
+  return "lax";
+}
+
+
 export const SESSION_COOKIE = "dnx_session";
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ISSUER = "darknote-nexus";
@@ -51,7 +63,7 @@ export function setSessionCookie(token: string, expiresAt: Date): void {
     name: SESSION_COOKIE,
     value: token,
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: cookieSameSite(),
     secure: isProd(),
     path: "/",
     expires: expiresAt,
@@ -63,7 +75,7 @@ export function clearSessionCookie(): void {
     name: SESSION_COOKIE,
     value: "",
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: cookieSameSite(),
     secure: isProd(),
     path: "/",
     maxAge: 0,

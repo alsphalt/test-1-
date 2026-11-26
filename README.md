@@ -107,6 +107,48 @@ ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='strong-pass-1' npm run db:seed
 - Files are stored in Postgres (simple, transactional, 4 MB cap). Swap `FileAsset.data` for Vercel Blob if you need larger uploads.
 - `UPSTASH_REDIS_REST_URL` / `..._TOKEN` are optional and only speed up cross-instance fan-out.
 
+## Cross-origin setup (the "Cross-origin request blocked" fix)
+
+The UI calls `/api/...` on the same origin, so a normal deploy needs no CORS
+configuration at all. When a preview/custom domain must call the API directly:
+
+1. Add the exact origin to `ALLOWED_ORIGINS` (comma separated). No wildcards —
+   the session cookie travels with the request.
+2. If the UI lives on a different host, set `NEXT_PUBLIC_API_BASE` to the API
+   origin; the client then uses `credentials: "include"`.
+3. Cross-site cookies require `COOKIE_SAMESITE=none` **and** HTTPS.
+4. `OPTIONS` is answered by middleware with `Access-Control-Allow-Origin: <exact
+   origin>`, `Allow-Credentials: true`, and the method/header lists; state-changing
+   requests from unknown origins are rejected with `403 CROSS_ORIGIN` before any
+   handler runs.
+
+Preferred topology is a same-origin `/api` proxy, which avoids the cookie rules
+entirely.
+
+## Bot agent API (external bot integration)
+
+A WhatsApp bot/control-center process can drive Nexus without merging projects.
+Authenticate with the `dnx_…` token issued by **Bots → Details → pairing code**:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/bot/v1/ping` | identity, pending pairing/commands (connection test) |
+| POST | `/api/bot/v1/sync` | authoritative snapshot: bot status + `sessions[]`; missing sessions are deleted |
+| GET | `/api/bot/v1/pairing` | pairing requests the dashboard queued |
+| POST | `/api/bot/v1/pairing/:id` | report the real code (or an error) |
+| GET | `/api/bot/v1/commands` | restart/unlink commands, claimed on read |
+| POST | `/api/bot/v1/commands/:id` | ack `DONE`/`ERROR` + result |
+| POST | `/api/bot/v1/events` | batched log lines (session-scoped or bot-scoped) |
+
+Tokens are hashed at rest, scoped to one owner, revocable from the dashboard and
+rejected immediately when the bot is disabled. Sessions reported by a bot are
+marked `source: "BOT"`, shown with the bot's name, and deleted when the bot stops
+reporting them — so the database, not the browser, stays authoritative.
+
+`docs/` in the bot repository describes the matching connector
+(`src/lib/nexus/*`) and the one endpoint the bot process must expose for real
+pairing codes.
+
 ## WhatsApp (Baileys) — how it actually works
 
 The web app never talks to WhatsApp. It stores intent; a long-lived worker owns the sockets.
@@ -201,4 +243,4 @@ npm run build && npm run start -- -p 3210
 node scripts/e2e.mjs
 ```
 
-`npm run e2e` exercises registration validation, duplicate emails, session issuance, profile updates, bot create → code → redeem → single-use enforcement → heartbeat → logs, file upload/download/delete, SSRF rejection, encrypted integration storage + live test, RBAC, admin suspension/reactivation, persistence across logout, SSE `ready`/`sync` frames, logout, and WhatsApp session ownership/validation/restart rules. Latest run: **60/60 passing**, plus **18/18** worker checks and a Playwright pass (desktop + mobile) with zero console errors.
+`npm run e2e` exercises registration validation, duplicate emails, session issuance, profile updates, bot create → code → redeem → single-use enforcement → heartbeat → logs, file upload/download/delete, SSRF rejection, encrypted integration storage + live test, RBAC, admin suspension/reactivation, persistence across logout, SSE `ready`/`sync` frames, logout, and WhatsApp session ownership/validation/restart rules. Latest run: **60/60 + 27/27 + 10/10**, plus **18/18** worker checks, the bot repository's own **174** tests and Playwright passes (desktop + mobile) with zero console errors.

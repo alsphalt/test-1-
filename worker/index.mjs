@@ -334,6 +334,7 @@ export function createWorker({ prisma, makeSocket, logger = console, workerId = 
 
   async function reconcile() {
     const rows = await prisma.whatsAppSession.findMany({
+      where: { source: "WORKER" },
       select: {
         id: true,
         phone: true,

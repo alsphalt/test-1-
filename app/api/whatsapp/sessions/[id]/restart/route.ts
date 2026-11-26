@@ -17,9 +17,22 @@ export const POST = route(async (req: Request, { params }: Ctx) => {
 
   const row = await prisma.whatsAppSession.findFirst({
     where: { id: params.id, userId: me.id },
-    select: { id: true, status: true, _count: { select: { keys: true } } },
+    select: { id: true, status: true, source: true, botId: true, _count: { select: { keys: true } } },
   });
   if (!row) throw notFound("Session not found");
+  if (row.source === "BOT") {
+    if (!row.botId) throw conflict("This session has no bot attached.");
+    await prisma.botCommand.create({ data: { botId: row.botId, sessionId: row.id, type: "RESTART" } });
+    const queued = await prisma.whatsAppSession.update({
+      where: { id: row.id },
+      data: { status: "RECONNECT_REQUESTED", statusDetail: "Restart queued for the bot." },
+      select: { id: true, status: true },
+    });
+    publish(me.id, "whatsapp.updated", { id: row.id, status: queued.status });
+    await audit({ userId: me.id, action: "whatsapp.restart", target: row.id, meta: { via: "bot" }, ip: clientIp(req) });
+    return json({ ok: true, status: queued.status, queued: true });
+  }
+
   if (row._count.keys === 0) throw conflict("No stored credentials yet — pair the number first.");
 
   const updated = await prisma.whatsAppSession.update({

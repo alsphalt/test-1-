@@ -12,6 +12,10 @@ export const dynamic = "force-dynamic";
 const shape = {
   id: true,
   label: true,
+  source: true,
+  botId: true,
+  bot: { select: { name: true } },
+  pairError: true,
   phone: true,
   status: true,
   statusDetail: true,
@@ -58,13 +62,30 @@ export const POST = route(async (req: Request) => {
     );
   }
 
+  let bot: { id: string; name: string; enabled: boolean } | null = null;
+  if (input.botId) {
+    bot = await prisma.bot.findFirst({
+      where: { id: input.botId, userId: me.id },
+      select: { id: true, name: true, enabled: true },
+    });
+    if (!bot) return json({ error: { code: "BOT_NOT_FOUND", message: "That bot is not yours." } }, 404);
+    if (!bot.enabled) {
+      return json({ error: { code: "BOT_DISABLED", message: "Enable the bot before adding sessions to it." } }, 409);
+    }
+  }
+
   const row = await prisma.whatsAppSession.create({
     data: {
       userId: me.id,
       label: input.label,
       phone: input.phone,
+      botId: bot?.id ?? null,
+      source: bot ? "BOT" : "WORKER",
       status: "PAIRING_REQUESTED",
-      statusDetail: "Waiting for the WhatsApp worker to issue a pairing code…",
+      pairRequestedAt: bot ? new Date() : null,
+      statusDetail: bot
+        ? `Waiting for ${bot.name} to issue the pairing code…`
+        : "Waiting for the WhatsApp worker to issue a pairing code…",
     },
     select: shape,
   });

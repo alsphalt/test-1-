@@ -15,6 +15,17 @@ export class ApiError extends Error {
 
 type ErrorBody = { error?: { code?: string; message?: string; details?: unknown } };
 
+/**
+ * Same-origin by default. Set NEXT_PUBLIC_API_BASE only when the UI is deployed
+ * apart from the API; that origin must also be in the server's ALLOWED_ORIGINS.
+ */
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || "").replace(/\/$/, "");
+
+function url(path: string): string {
+  if (!API_BASE) return path;
+  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   let payload: BodyInit | undefined;
@@ -26,13 +37,24 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     payload = JSON.stringify(body);
   }
 
-  const res = await fetch(path, {
-    method,
-    headers,
-    body: payload,
-    credentials: "same-origin",
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(url(path), {
+      method,
+      headers,
+      body: payload,
+      credentials: API_BASE ? "include" : "same-origin",
+      cache: "no-store",
+    });
+  } catch {
+    throw new ApiError(
+      0,
+      "NETWORK",
+      API_BASE
+        ? `Cannot reach the API at ${API_BASE}. Check the URL, that it is in ALLOWED_ORIGINS, and that HTTPS is used.`
+        : "Cannot reach the API. Check your connection and that the server is running.",
+    );
+  }
 
   const contentType = res.headers.get("content-type") || "";
   const data = contentType.includes("application/json") ? await res.json() : null;

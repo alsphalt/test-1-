@@ -20,7 +20,7 @@ export const POST = route(async (req: Request, { params }: Ctx) => {
 
   const row = await prisma.whatsAppSession.findFirst({
     where: { id: params.id, userId: me.id },
-    select: { id: true, status: true, phone: true },
+    select: { id: true, status: true, phone: true, source: true, botId: true },
   });
   if (!row) throw notFound("Session not found");
   if (row.status === "CONNECTED") throw conflict("That session is already connected.");
@@ -30,9 +30,14 @@ export const POST = route(async (req: Request, { params }: Ctx) => {
     where: { id: row.id },
     data: {
       status: "PAIRING_REQUESTED",
-      statusDetail: "Requesting a new pairing code…",
+      statusDetail:
+        row.source === "BOT"
+          ? "Waiting for the bot to issue a fresh pairing code…"
+          : "Requesting a new pairing code…",
       pairingCode: "",
       pairingExpiresAt: null,
+      pairError: "",
+      ...(row.source === "BOT" ? { pairRequestedAt: new Date() } : {}),
     },
     select: { id: true, status: true },
   });

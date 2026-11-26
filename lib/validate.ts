@@ -41,6 +41,7 @@ export const profileUpdateSchema = z
 
 export const whatsappCreateSchema = z.object({
   label: z.string().trim().min(2, "Give the session a name").max(60, "Name is too long"),
+  botId: z.string().trim().max(40).optional(),
   phone: z
     .string()
     .trim()
@@ -48,6 +49,57 @@ export const whatsappCreateSchema = z.object({
     .max(20)
     .transform((v) => v.replace(/[^\d]/g, "").replace(/^0+/, ""))
     .refine((v) => /^[1-9]\d{7,14}$/.test(v), "Use the international format, e.g. 447700900123"),
+});
+
+export const botSyncSchema = z.object({
+  status: z.enum(["ONLINE", "OFFLINE", "PAUSED", "ERROR"]).default("ONLINE"),
+  version: z.string().max(40).optional(),
+  message: z.string().max(300).optional(),
+  messagesSent: z.number().int().min(0).optional(),
+  errors: z.number().int().min(0).optional(),
+  sessions: z
+    .array(
+      z.object({
+        externalId: z.string().min(1).max(120),
+        label: z.string().max(60).optional(),
+        phone: z.string().max(20).default(""),
+        status: z.string().max(24),
+        statusDetail: z.string().max(300).optional(),
+        meNumber: z.string().max(24).optional(),
+        meJid: z.string().max(140).optional(),
+        platform: z.string().max(40).optional(),
+        connectedAt: z.string().datetime().optional(),
+        pairingCode: z.string().max(16).optional(),
+      }),
+    )
+    .max(50)
+    .default([]),
+});
+
+export const botPairResultSchema = z
+  .object({
+    code: z.string().trim().max(16).optional(),
+    error: z.string().trim().max(300).optional(),
+    phone: z.string().trim().max(20).optional(),
+    expiresAt: z.string().datetime().optional(),
+  })
+  .refine((v) => Boolean(v.code) !== Boolean(v.error), "Send either code or error");
+
+export const botEventsSchema = z.object({
+  events: z
+    .array(
+      z.object({
+        level: z.enum(["INFO", "WARN", "ERROR"]).default("INFO"),
+        message: z.string().min(1).max(500),
+        sessionId: z.string().max(60).optional(),
+      }),
+    )
+    .max(50),
+});
+
+export const botCommandResultSchema = z.object({
+  status: z.enum(["DONE", "ERROR"]),
+  result: z.string().max(300).optional(),
 });
 
 export const botCreateSchema = z.object({

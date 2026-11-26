@@ -68,6 +68,10 @@ export function isWorkerLive(status: string, lastSeenAt?: Date | string | null):
 export type PublicSession = {
   id: string;
   label: string;
+  source: string;
+  botId: string | null;
+  botName: string;
+  pairError: string;
   phone: string;
   prettyPhone: string;
   status: WaStatus;
@@ -92,6 +96,10 @@ export type PublicSession = {
 type SessionRow = {
   id: string;
   label: string;
+  source?: string;
+  botId?: string | null;
+  bot?: { name: string } | null;
+  pairError?: string;
   phone: string;
   status: string;
   statusDetail: string;
@@ -118,6 +126,10 @@ export function toPublicSession(row: SessionRow): PublicSession {
   return {
     id: row.id,
     label: row.label,
+    source: row.source || "WORKER",
+    botId: row.botId || null,
+    botName: row.bot?.name || "",
+    pairError: row.pairError || "",
     phone: row.phone,
     prettyPhone: prettyPhone(row.phone || row.meNumber),
     status,

@@ -19,9 +19,13 @@ export const POST = route(async (req: Request, { params }: Ctx) => {
 
   const row = await prisma.whatsAppSession.findFirst({
     where: { id: params.id, userId: me.id },
-    select: { id: true, status: true },
+    select: { id: true, status: true, source: true, botId: true },
   });
   if (!row) throw notFound("Session not found");
+
+  if (row.source === "BOT" && row.botId) {
+    await prisma.botCommand.create({ data: { botId: row.botId, sessionId: row.id, type: "LOGOUT" } });
+  }
 
   const updated = await prisma.whatsAppSession.update({
     where: { id: row.id },
@@ -32,7 +36,7 @@ export const POST = route(async (req: Request, { params }: Ctx) => {
       pairingExpiresAt: null,
       connectedAt: null,
     },
-    select: { id: true, status: true },
+    select: { id: true, status: true, source: true, botId: true },
   });
 
   publish(me.id, "whatsapp.updated", { id: row.id, status: updated.status });

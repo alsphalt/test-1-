@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isAllowedOrigin } from "./origin";
 import { ZodError } from "zod";
 
 export class ApiError extends Error {
@@ -110,15 +111,13 @@ export function assertSameOrigin(req: Request): void {
   const origin = req.headers.get("origin");
   if (!origin) return; // non-browser client (curl, bot heartbeat) — auth still applies
 
-  const host = req.headers.get("host");
-  let originHost = "";
-  try {
-    originHost = new URL(origin).host;
-  } catch {
-    throw forbidden("Invalid origin");
-  }
-  if (!host || originHost !== host) {
-    throw forbidden("Cross-origin request blocked");
+  const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
+  if (!isAllowedOrigin(origin, host)) {
+    throw new ApiError(
+      403,
+      "CROSS_ORIGIN",
+      `This origin is not allowed to call the API. Add ${new URL(origin).origin} to ALLOWED_ORIGINS, or call the API through the same domain (/api).`,
+    );
   }
 }
 

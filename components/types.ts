@@ -35,6 +35,10 @@ export type WaStatus =
 export type WaSession = {
   id: string;
   label: string;
+  source: "WORKER" | "BOT";
+  botId: string | null;
+  botName: string;
+  pairError: string;
   phone: string;
   prettyPhone: string;
   status: WaStatus;

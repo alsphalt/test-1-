@@ -78,6 +78,8 @@ model Bot {
   updatedAt    DateTime @updatedAt
 
   logs         BotLog[]
+  whatsapp     WhatsAppSession[]
+  commands     BotCommand[]
   @@index([userId])
 }
 
@@ -153,6 +155,12 @@ model WhatsAppSession {
   id              String    @id @default(cuid())
   userId          String
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  botId           String?   // set when the session is owned by an external bot agent
+  bot             Bot?      @relation(fields: [botId], references: [id], onDelete: SetNull)
+  source          String    @default("WORKER") // WORKER | BOT
+  externalId      String    @default("")       // session id on the bot host
+  pairRequestedAt DateTime?
+  pairError       String    @default("")
   label           String
   phone           String    @default("") // digits only, E.164 without +
   status          String    @default("PAIRING_REQUESTED")
@@ -176,6 +184,8 @@ model WhatsAppSession {
 
   @@index([userId, createdAt])
   @@index([status])
+  @@index([botId])
+  @@unique([botId, externalId])
 }
 
 model WhatsAppKey {
@@ -196,4 +206,19 @@ model WhatsAppLog {
   createdAt DateTime @default(now())
 
   @@index([sessionId, createdAt])
+}
+
+model BotCommand {
+  id          String    @id @default(cuid())
+  botId       String
+  bot         Bot       @relation(fields: [botId], references: [id], onDelete: Cascade)
+  sessionId   String?   // WhatsAppSession.id on this side
+  type        String    // RESTART | LOGOUT
+  status      String    @default("PENDING") // PENDING | DONE | ERROR
+  result      String    @default("")
+  createdAt   DateTime  @default(now())
+  deliveredAt DateTime?
+  completedAt DateTime?
+
+  @@index([botId, status])
 }
