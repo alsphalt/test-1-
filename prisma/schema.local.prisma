@@ -1,0 +1,149 @@
+// Darknote Nexus — production schema (PostgreSQL)
+// Portable subset: no enums / arrays so the same models run on SQLite for local verification.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "sqlite"
+  url       = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  avatar       String   @default("")
+  role         String   @default("USER") // USER | ADMIN
+  status       String   @default("ACTIVE") // ACTIVE | SUSPENDED
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lastLoginAt  DateTime?
+
+  sessions     Session[]
+  notes        Note[]
+  bots         Bot[]
+  files        FileAsset[]
+  integrations Integration[]
+  auditLogs    AuditLog[]
+}
+
+model Session {
+  id         String   @id
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userAgent  String   @default("")
+  ip         String   @default("")
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Note {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String   @default("")
+  body      String   @default("")
+  pinned    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, updatedAt])
+}
+
+model Bot {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  description  String   @default("")
+  tokenHash    String?  @unique
+  tokenPrefix  String   @default("")
+  status       String   @default("OFFLINE") // ONLINE | OFFLINE | PAUSED | ERROR
+  enabled      Boolean  @default(true)
+  pairedAt     DateTime?
+  lastSeenAt   DateTime?
+  version      String   @default("")
+  messagesSent Int      @default(0)
+  errors       Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  logs         BotLog[]
+  @@index([userId])
+}
+
+model BotLog {
+  id        String   @id @default(cuid())
+  botId     String
+  bot       Bot      @relation(fields: [botId], references: [id], onDelete: Cascade)
+  level     String   @default("INFO") // INFO | WARN | ERROR
+  message   String
+  meta      String   @default("")
+  createdAt DateTime @default(now())
+
+  @@index([botId, createdAt])
+}
+
+model PairingCode {
+  id        String    @id
+  code      String    @unique
+  userId    String
+  botId     String
+  usedAt    DateTime?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  @@index([expiresAt])
+  @@index([botId])
+}
+
+model FileAsset {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  mimeType  String
+  size      Int
+  data      String // base64 payload (<= 4MB)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model Integration {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider   String
+  baseUrl    String
+  headerName String   @default("Authorization")
+  keyPrefix  String   @default("")
+  keyCipher  String
+  status     String   @default("UNTESTED") // UNTESTED | OK | FAILED
+  lastTestAt DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  target    String   @default("")
+  meta      String   @default("")
+  ip        String   @default("")
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+}
