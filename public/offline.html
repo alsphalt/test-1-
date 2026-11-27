@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Offline — Darknote Nexus</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  body{
+    margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;
+    background:radial-gradient(ellipse at 50% 40%,rgba(255,31,61,.16),transparent 62%),#05060a;
+    font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:#fff;text-align:center;
+  }
+  .wrap{max-width:420px}
+  .mk{width:104px;height:104px;margin:0 auto 22px;border-radius:26px;display:grid;place-items:center;
+      background:linear-gradient(150deg,#1a0710,#0a0a0d);border:1px solid rgba(255,255,255,.08);
+      box-shadow:0 24px 60px rgba(255,31,61,.18)}
+  h1{font-family:Orbitron,Inter,sans-serif;font-size:20px;letter-spacing:.16em;margin:0 0 10px}
+  p{color:#a3a3ad;font-size:14px;line-height:1.65;margin:0 0 22px}
+  button{
+    appearance:none;border:0;cursor:pointer;padding:12px 22px;border-radius:11px;
+    font:600 13.5px Inter,sans-serif;color:#04120a;
+    background:linear-gradient(90deg,#2f8cff,#22d36b);
+  }
+  button:active{transform:translateY(1px)}
+  small{display:block;margin-top:18px;color:#6f6f79;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="mk" aria-hidden="true">
+      <svg width="58" height="58" viewBox="0 0 100 100">
+        <defs>
+          <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#ff2e4d"/><stop offset="1" stop-color="#ff7ac8"/>
+          </linearGradient>
+        </defs>
+        <path d="M50 10 L70 44 L58 44 L78 68 L64 68 L88 90 L12 90 L36 68 L22 68 L42 44 L30 44 Z" fill="url(#g)"/>
+        <rect x="46.5" y="89" width="7" height="9" fill="#ff2e4d"/>
+      </svg>
+    </div>
+    <h1>NO CONNECTION</h1>
+    <p>
+      Darknote Nexus needs the network for live bot status and messages. Anything you already
+      loaded stays available — reconnect and the dashboard picks up where it stopped.
+    </p>
+    <button onclick="location.replace('/')">Try again</button>
+    <small>Darknote Nexus · offline</small>
+  </div>
+</body>
+</html>

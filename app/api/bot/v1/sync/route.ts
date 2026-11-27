@@ -132,8 +132,18 @@ export const POST = route(async (req: Request) => {
     where: {
       botId: bot.id,
       source: "BOT",
-      status: { notIn: ["PAIRING_REQUESTED"] },
       externalId: { notIn: seen.length ? seen : ["__none__"] },
+      // Live work must survive a snapshot that has not caught up yet: queued or
+      // armed codes, plus anything the owner started in the last 15 minutes.
+      // A transient DISCONNECTED while the pairing socket settles must not wipe
+      // the code the owner is typing.
+      status: { notIn: ["PAIRING_REQUESTED", "PAIRING_CODE", "RECONNECT_REQUESTED"] },
+      NOT: {
+        OR: [
+          { pairingExpiresAt: { gt: new Date() } },
+          { pairRequestedAt: { gt: new Date(Date.now() - 15 * 60_000) } },
+        ],
+      },
     },
   });
 

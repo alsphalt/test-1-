@@ -459,3 +459,27 @@ The panel keeps **one row per number**: a sync either updates the pending row th
 owner created (matched by `requestId`, or by phone on the bot's first sync) or
 creates the row when the session first appears. Pending rows are never deleted
 by a sync, so "pair from the panel" cannot race the bot.
+
+## Bot bridge (independent hosting)
+
+The bot runs on its own host and connects out to this website; nothing is hosted
+together and the bot needs no inbound port.
+
+| Direction | Transport | Auth |
+| --- | --- | --- |
+| Bot → website (state, pairing results, commands ack) | `POST /api/bot/v1/sync`, `/pairing/:id`, `/commands/:id`, `/events` | `Authorization: Bearer dnx_…` (hashed in DB, revocable) |
+| Website → bot (pair request, restart, unlink) | `GET /api/bot/v1/stream` (SSE push) + 10s poll fallback | same bot token |
+
+The stream is a change feed over Postgres: a pairing request bumps the
+revision, the website pushes `pairing`/`command` frames within ~1.5s, the bot
+opens the WhatsApp pairing socket and reports the real code back. Browser side
+uses `GET /api/events` (SSE), so the code appears without a reload.
+
+Measured on a local run: **871 ms** from submitting a number in the page to the
+code appearing; **4.3 s** for a request queued while the bot was offline to be
+delivered when it reconnected.
+
+Failure handling: unknown/expired token → `401` (bot stops retrying), no agent
+reporting for 45 s → page shows OFFLINE and the request stays queued, invalid
+number → `422` before it reaches WhatsApp, expired code → the page asks for a
+fresh one (the bot re-arms every ~50 s).
