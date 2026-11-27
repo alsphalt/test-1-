@@ -80,7 +80,7 @@ ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='strong-pass-1' npm run db:seed
 ## Deploy to Vercel
 
 1. **Database** — create a Postgres instance (Vercel Postgres/Neon/Supabase) and copy both the pooled and direct connection strings.
-2. **Project** — import the repo (framework preset: Next.js; build command `npm run vercel-build`, already in `vercel.json`). That command runs `prisma generate`, applies pending migrations, then `next build`, so the schema cannot drift behind the deployed code.
+2. **Project** — import the repo (framework preset: Next.js; build command `npm run vercel-build`, already in `vercel.json`). That command runs `prisma generate`, applies pending migrations, then `next build`, so the schema cannot drift behind the deployed code. A migration *history* problem on an already-correct database (for example tables created with `db push`) can no longer block a release: `db-deploy --advisory` re-checks the live schema with `db-verify --gate` and continues only when nothing the app needs is missing.
 3. **Environment variables** (Production + Preview):
 
    | Name | Value |
@@ -101,6 +101,46 @@ ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='strong-pass-1' npm run db:seed
 
 5. **Deploy** — `vercel --prod` (or push to the connected branch).
 6. **Verify** — register, create a bot, pair it, run `node scripts/bot-agent.mjs --url https://<project>.vercel.app --code <CODE>`, watch the bot flip to ONLINE and log lines appear without a reload.
+
+### "The server is missing AUTH_SECRET" on a project that has AUTH_SECRET
+
+Vercel **snapshots environment variables into each deployment**. Adding or
+changing a variable never reaches a deployment that already exists, and a
+redeploy that fails leaves the previous build serving the domain — so the site
+keeps reporting a missing secret while the dashboard shows it as set.
+
+`GET /api/health` answers this directly. `deployment.commit` is the git commit
+that produced the running build, and `secrets.sources` names the variable the
+runtime actually resolved:
+
+```json
+{
+  "env": { "AUTH_SECRET": "set", "ENCRYPTION_KEY": "set" },
+  "secrets": {
+    "sources": {
+      "authSecret": { "name": "AUTH_SECRET", "status": "set" },
+      "encryptionKey": { "name": "ENCRYPTION_KEY", "status": "set" },
+      "checked": { "authSecret": ["AUTH_SECRET", "NEXTAUTH_SECRET", "SESSION_SECRET"] }
+    }
+  },
+  "deployment": { "commit": "…", "target": "production" }
+}
+```
+
+Read it in this order:
+
+| What you see | What it means |
+| --- | --- |
+| `AUTH_SECRET: "missing"`, `deployment.commit` older than your latest push | The running deployment predates the variable. Check the Vercel build result for the newer commit; the alias only moves after a build succeeds. |
+| `AUTH_SECRET: "missing"`, `deployment.commit` is current | The variable is not in this project **for this environment**. Check Production vs Preview and the value's target environments. |
+| `sources.authSecret.name` is `NEXTAUTH_SECRET` | It is configured under an accepted alias; signing works and the state is reported as `set`. |
+| `AUTH_SECRET: "too_short"` / `"placeholder"` | The value reached the runtime but is unusable (under 32 characters, or still a template string). |
+
+Secrets are read at request time (`lib/env.ts`), never at build time, so a
+deployment that receives a variable still reads the live value. Values are
+normalised once (whitespace, surrounding quotes, a pasted `NAME=value` line,
+zero-width characters), and the module refuses to be imported into a browser
+bundle.
 
 ### "The database is connected but its tables are missing or out of date"
 

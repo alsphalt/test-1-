@@ -23,6 +23,10 @@ import { PrismaClient } from "@prisma/client";
 
 const strict = process.argv.includes("--strict");
 const quiet = process.argv.includes("--quiet");
+// --gate: fail only on gaps that break the deployed app (missing tables,
+// columns, unique constraints, foreign keys or real drift). A comparison that
+// could not run is reported but does not block a release.
+const gate = process.argv.includes("--gate");
 const SCHEMA = process.env.PRISMA_SCHEMA || "prisma/schema.prisma";
 
 const SCALARS = new Set(["String", "Int", "BigInt", "Float", "Decimal", "Boolean", "DateTime", "Json", "Bytes"]);
@@ -119,7 +123,13 @@ if (url) {
   process.env.DATABASE_URL = process.env.DATABASE_URL?.trim() || url;
 }
 
-const report = { failures: [], warnings: [] };
+const report = { failures: [], warnings: [], hard: [] };
+
+/** A failure that makes the deployed application wrong, not just untidy. */
+function broken(message) {
+  report.failures.push(message);
+  report.hard.push(message);
+}
 
 function heading(title) {
   console.log(`\n${title}`);
@@ -160,7 +170,7 @@ if (diff.status !== 0) {
 } else if (!diffSql) {
   console.log("  ok   database matches prisma/schema.prisma — nothing to apply");
 } else {
-  report.failures.push("database is behind prisma/schema.prisma");
+  broken("database is behind prisma/schema.prisma");
   console.log("  FAIL the database is out of date. Missing DDL:");
   console.log(
     diffSql
@@ -180,7 +190,7 @@ try {
   const schemaSource = readFileSync(SCHEMA, "utf8");
   const expected = parseSchema(schemaSource);
   if (expected.size === 0) {
-    report.failures.push("no models found in the schema file");
+    broken("no models found in the schema file");
     console.log(`  FAIL no models parsed from ${SCHEMA}`);
   }
 
@@ -201,13 +211,13 @@ try {
   for (const [table, spec] of expected) {
     const actual = byTable.get(table);
     if (!actual) {
-      report.failures.push(`table "${table}" is missing`);
+      broken(`table "${table}" is missing`);
       console.log(`  FAIL ${table} — table missing`);
       continue;
     }
     const missing = spec.columns.filter((c) => !actual.has(c));
     if (missing.length) {
-      report.failures.push(`table "${table}" is missing column(s): ${missing.join(", ")}`);
+      broken(`table "${table}" is missing column(s): ${missing.join(", ")}`);
       console.log(`  FAIL ${table} — missing columns: ${missing.join(", ")}`);
     } else {
       okTables += 1;
@@ -231,7 +241,7 @@ try {
     console.log(`  ok   ${applied.length} migration(s) recorded as applied`);
     for (const row of applied) console.log(`       · ${row.migration_name}`);
     for (const row of failed) {
-      report.failures.push(`migration "${row.migration_name}" failed and was not rolled back`);
+      broken(`migration "${row.migration_name}" failed and was not rolled back`);
       console.log(`  FAIL failed migration: ${row.migration_name}`);
       const tail = String(row.logs ?? "").trim().split("\n").slice(-3).join(" ");
       if (tail) console.log(`       ${tail}`);
@@ -263,10 +273,10 @@ try {
       const key = cols.join(",");
       const hit = actual?.get(key);
       if (!hit) {
-        report.failures.push(`"${table}" has no unique constraint on (${key})`);
+        broken(`"${table}" has no unique constraint on (${key})`);
         console.log(`  FAIL ${table} unique (${key}) — missing`);
       } else if (!hit.unique) {
-        report.failures.push(`"${table}" index on (${key}) is not unique`);
+        broken(`"${table}" index on (${key}) is not unique`);
         console.log(`  FAIL ${table} unique (${key}) — present but not UNIQUE`);
       }
     }
@@ -300,7 +310,7 @@ try {
     for (const rel of spec.relations) {
       const key = `${table}.${rel.column}->${rel.refTable}.${rel.refColumn}`;
       if (!fkKeys.has(key)) {
-        report.failures.push(`"${table}.${rel.column}" has no foreign key to ${rel.refTable}.${rel.refColumn}`);
+        broken(`"${table}.${rel.column}" has no foreign key to ${rel.refTable}.${rel.refColumn}`);
         console.log(`  FAIL ${key} — foreign key missing`);
       }
     }
@@ -328,6 +338,19 @@ heading("Result");
 if (report.failures.length === 0) {
   console.log(`  PASS schema is complete${report.warnings.length ? ` (${report.warnings.length} warning(s))` : ""}`);
   process.exit(0);
+}
+
+if (gate) {
+  // Only schema-breaking gaps matter here: everything listed in `hard`.
+  if (report.hard.length === 0) {
+    console.log(`  PASS no schema-breaking gap${report.warnings.length ? ` (${report.warnings.length} warning(s))` : ""}`);
+    for (const item of report.failures) console.log(`       advisory: ${item}`);
+    process.exit(0);
+  }
+  console.log(`  FAIL ${report.hard.length} schema-breaking problem(s) found:`);
+  for (const item of report.hard) console.log(`       · ${item}`);
+  console.log("\n  Fix with: npm run db:deploy   (applies pending migrations, never drops data)");
+  process.exit(1);
 }
 
 console.log(`  FAIL ${report.failures.length} problem(s) found:`);

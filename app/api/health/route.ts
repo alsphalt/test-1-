@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { probeDatabase } from "@/lib/dbprobe";
 import { configuredOrigins } from "@/lib/origin";
 import { sessionCookieSecurity } from "@/lib/auth";
-import { secretStatus, secretsConfigured } from "@/lib/env";
+import { secretSources, secretsConfigured } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,9 +23,13 @@ export async function GET() {
   const allowedOrigins = configuredOrigins();
   const cookie = sessionCookieSecurity();
 
+  // Resolved status, not just the canonical name: a value found under an
+  // accepted alias (NEXTAUTH_SECRET, SESSION_SECRET, …) counts as configured.
+  const sources = secretSources();
+
   const env = {
-    AUTH_SECRET: secretStatus("AUTH_SECRET"),
-    ENCRYPTION_KEY: secretStatus("ENCRYPTION_KEY"),
+    AUTH_SECRET: sources.authSecret.status,
+    ENCRYPTION_KEY: sources.encryptionKey.status,
     DATABASE_URL: presence(process.env.DATABASE_URL),
     DIRECT_URL: presence(process.env.DIRECT_URL),
     APP_URL: presence(process.env.APP_URL),
@@ -51,7 +55,7 @@ export async function GET() {
   const warnings: string[] = [];
   if (env.AUTH_SECRET === "missing") {
     warnings.push(
-      "AUTH_SECRET is missing — signing in cannot work. If it is set in the Vercel dashboard, this deployment was built before it was added: redeploy, and confirm the variable is enabled for Production.",
+      `No usable AUTH_SECRET in this deployment's runtime (checked ${sources.checked.authSecret.join(", ")}). If it is set in the dashboard, this deployment predates it — Vercel snapshots variables per deployment, so only a new build sees them.`,
     );
   }
   if (env.AUTH_SECRET === "too_short") warnings.push("AUTH_SECRET is shorter than 32 characters.");
@@ -135,6 +139,12 @@ export async function GET() {
         // Presence only. Two independent values are required.
         bothPresent: env.AUTH_SECRET === "set" && env.ENCRYPTION_KEY === "set",
         distinct: secretsConfigured(),
+        /**
+         * Which accepted name the runtime actually resolved, and every name it
+         * looked for. Names only — no values, prefixes or lengths. This is the
+         * difference between "not configured" and "configured as NEXTAUTH_SECRET".
+         */
+        sources,
       },
       at: new Date().toISOString(),
     },

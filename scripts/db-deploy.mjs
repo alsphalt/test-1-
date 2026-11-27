@@ -22,6 +22,12 @@
  *   DIRECT_URL        preferred — direct (non-pooled) URL used for DDL
  *   DB_MIGRATE_STRICT "false" downgrades a failure to a warning
  *   DB_MIGRATE_ALLOW_PREVIEW "true" lets a Vercel preview build migrate
+ *
+ * `--advisory` is used by the deploy build: if applying migrations fails but
+ * the database already satisfies prisma/schema.prisma, the migration history is
+ * merely out of step — the application can run, so the build continues with a
+ * loud warning instead of blocking every subsequent deployment. If the schema
+ * is genuinely behind, the build still fails.
  */
 import { spawnSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
@@ -29,6 +35,7 @@ import { listMigrations, migrationObjects } from "./lib/migration-objects.mjs";
 
 const MIGRATIONS_DIR = "prisma/migrations";
 const strict = (process.env.DB_MIGRATE_STRICT ?? "true").toLowerCase() !== "false";
+const advisory = process.argv.includes("--advisory");
 
 function say(line = "") {
   console.log(line);
@@ -80,6 +87,26 @@ function fail(message, detail = "") {
   say(`\n\u2716 ${message}`);
   if (detail) say(redact(detail).split("\n").map((l) => `  ${l}`).join("\n"));
   say("\n  Nothing was dropped and no rows were deleted.");
+
+  if (advisory) {
+    // The migration bookkeeping is broken, but is the database itself usable?
+    // Only prisma/schema.prisma can answer that, so ask the verifier.
+    say("\n\u00b7 --advisory: checking whether the database already matches prisma/schema.prisma");
+    const check = spawnSync(process.execPath, ["scripts/db-verify.mjs", "--quiet", "--gate"], {
+      encoding: "utf8",
+      env: { ...process.env, CHECKPOINT_DISABLE: "1" },
+    });
+    if (check.status === 0) {
+      say("\u2713 the schema is complete — the application can run, continuing the build.");
+      say("  This deploy did not change the database. Repair the migration history separately");
+      say("  with: npm run db:verify  then  npm run db:deploy");
+      process.exit(0);
+    }
+    say("\u2716 the schema is also incomplete — refusing to deploy code that needs missing objects.");
+    const tail = `${check.stdout || ""}${check.stderr || ""}`.trim().split("\n").slice(-12).join("\n");
+    if (tail) say(redact(tail).split("\n").map((l) => `  ${l}`).join("\n"));
+  }
+
   process.exit(strict ? 1 : 0);
 }
 
