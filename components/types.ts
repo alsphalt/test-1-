@@ -165,3 +165,72 @@ export type AuditRow = {
   createdAt: string;
   user?: { email: string } | null;
 };
+
+/* ------------------------------- Darknote Setup ------------------------------ */
+
+export type SetupAccount = {
+  id: string;
+  username: string;
+  displayName: string;
+  phone: string;
+  status: "INVITED" | "PENDING" | "ACTIVE" | "SUSPENDED" | "REVOKED" | string;
+  codePrefix: string;
+  codeExpiresAt: string;
+  codeDelivery: "NOT_SENT" | "QUEUED" | "SENT" | "FAILED" | string;
+  codeDeliveryNote: string;
+  linkedUserId: string | null;
+  linkedEmail: string | null;
+  createdAt: string;
+  lastLoginAt: string | null;
+  activatedAt: string | null;
+};
+
+export type SetupState = {
+  ownerEligible: boolean;
+  unlocked: boolean;
+  role: "OWNER" | "USER" | null;
+  needs: "owner_token" | "code" | "activation" | "approval" | "blocked" | "unlocked";
+  account: SetupAccount | null;
+  ownerEmailsHint: string;
+};
+
+export type SetupOverview = {
+  generatedAt: string;
+  bots: { total: number; paired: number; connected: number; disconnected: number };
+  whatsapp: { total: number; connected: number; disconnected: number };
+  website: {
+    activeSessions: number;
+    activeUsers: number;
+    sessions: { id: string; ip: string; userAgent: string; lastSeenAt: string; email: string }[];
+  };
+  setup: { total: number; active: number; suspended: number; pendingRequests: number };
+  recentBots: {
+    id: string;
+    name: string;
+    status: string;
+    pairedAt: string | null;
+    lastSeenAt: string | null;
+    email: string;
+  }[];
+  recentDisconnected: { id: string; label: string; number: string; status: string; at: string; email: string }[];
+  audit: { id: string; action: string; target: string; at: string; ip: string; email: string | null }[];
+};
+
+export type SetupRequest = {
+  id: string;
+  status: string;
+  createdAt: string;
+  decidedAt: string | null;
+  requestedBy: { id: string; email: string; name: string } | null;
+  account: SetupAccount;
+};
+
+export type SetupActivity = {
+  id: string;
+  action: string;
+  target: string;
+  meta: Record<string, unknown> | null;
+  ip: string;
+  at: string;
+  email: string | null;
+};

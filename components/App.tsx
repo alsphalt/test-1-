@@ -10,6 +10,7 @@ import WhatsApp from "./views/WhatsApp";
 import Files from "./views/Files";
 import Integrations from "./views/Integrations";
 import Admin from "./views/Admin";
+import Setup from "./views/Setup";
 import Account from "./views/Account";
 import { ToastProvider, useToast } from "./ui";
 import { api } from "./api";
@@ -120,6 +121,15 @@ function Nexus() {
     toast("Signed out", "ok");
   };
 
+  /* Leaving Setup locks it server-side; bots are not touched. */
+  const previousView = useRef<View>(view);
+  useEffect(() => {
+    if (previousView.current === "setup" && view !== "setup") {
+      void api.post("/api/setup/lock").catch(() => undefined);
+    }
+    previousView.current = view;
+  }, [view]);
+
   useEffect(() => {
     const onUnauthorized = () => {
       setMe(null);
@@ -164,6 +174,7 @@ function Nexus() {
       {view === "whatsapp" && <WhatsApp tick={tick} />}
       {view === "files" && <Files tick={tick} />}
       {view === "integrations" && <Integrations tick={tick} />}
+      {view === "setup" && <Setup me={me} tick={tick} />}
       {view === "admin" && (me.role === "ADMIN" ? <Admin me={me} tick={tick} /> : <div className="panel">Administrator access required.</div>)}
       {view === "account" && <Account me={me} counts={counts} tick={tick} onLogout={logout} />}
     </Shell>

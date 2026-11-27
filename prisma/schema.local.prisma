@@ -222,3 +222,95 @@ model BotCommand {
 
   @@index([botId, status])
 }
+
+// Darknote Setup / owner access
+
+model SetupAccount {
+  id                String    @id @default(cuid())
+  username          String    @unique
+  passwordHash      String
+  phone             String    @default("") // E.164 with leading +
+  displayName       String    @default("")
+  status            String    @default("INVITED") // INVITED | PENDING | ACTIVE | SUSPENDED | REVOKED
+  setupCodeHash     String
+  setupCodePrefix   String    @default("")
+  setupCodeIssuedAt DateTime  @default(now())
+  setupCodeExpiresAt DateTime
+  setupCodeUsedAt   DateTime?
+  codeDelivery      String    @default("NOT_SENT") // NOT_SENT | SENT | FAILED
+  codeDeliveryNote  String    @default("")
+  userId            String? // linked main Nexus account
+  createdById       String?
+  activatedAt       DateTime?
+  lastLoginAt       DateTime?
+  failedAttempts    Int       @default(0)
+  lockedUntil       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  requests SetupAccessRequest[]
+  sessions SetupSession[]
+
+  @@index([status])
+  @@index([userId])
+}
+
+model SetupAccessRequest {
+  id             String       @id @default(cuid())
+  setupAccountId String
+  account        SetupAccount @relation(fields: [setupAccountId], references: [id], onDelete: Cascade)
+  userId         String?
+  status         String       @default("PENDING") // PENDING | APPROVED | REJECTED
+  note           String       @default("")
+  decidedById    String?
+  createdAt      DateTime     @default(now())
+  decidedAt      DateTime?
+
+  @@index([status, createdAt])
+  @@index([setupAccountId])
+}
+
+model SetupSession {
+  id             String        @id
+  setupAccountId String?
+  account        SetupAccount? @relation(fields: [setupAccountId], references: [id], onDelete: Cascade)
+  ownerUserId    String?
+  role           String        @default("USER") // OWNER | USER
+  tokenHash      String        @unique
+  ip             String        @default("")
+  userAgent      String        @default("")
+  createdAt      DateTime      @default(now())
+  lastSeenAt     DateTime      @default(now())
+  expiresAt      DateTime
+  revokedAt      DateTime?
+
+  @@index([setupAccountId])
+  @@index([ownerUserId])
+  @@index([expiresAt])
+}
+
+model OwnerCredential {
+  id          String   @id @default("owner")
+  tokenHash   String
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// WhatsApp outbound queue
+
+model WhatsAppOutbox {
+  id        String    @id @default(cuid())
+  sessionId String
+  to        String // digits only, no +
+  body      String
+  purpose   String    @default("")
+  status    String    @default("QUEUED") // QUEUED | SENT | FAILED
+  attempts  Int       @default(0)
+  error     String    @default("")
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@index([status, createdAt])
+  @@index([sessionId])
+}

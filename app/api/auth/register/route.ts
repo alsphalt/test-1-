@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export const POST = route(async (req: Request) => {
   assertSameOrigin(req);
   const ip = clientIp(req);
-  rateLimit(`register:${ip}`, 5, 10 * 60_000);
+  rateLimit(`register:${ip}`, 10, 10 * 60_000);
 
   const body = await readJson<unknown>(req);
   const { name, email, password } = registerSchema.parse(body);

@@ -25,6 +25,7 @@ import makeWASocket, {
 const TICK_MS = 3_000;
 const HEARTBEAT_MS = 15_000;
 const MAINTENANCE_MS = 60 * 60_000;
+const OUTBOX_MS = 5_000;
 const CODE_TTL_MS = 60_000;
 const MAX_RETRIES = 6;
 const STALE_MS = 90_000;
@@ -427,13 +428,58 @@ export function createWorker({ prisma, makeSocket, logger = console, workerId = 
     await prisma.whatsAppLog.deleteMany({ where: { createdAt: { lt: cutoff } } }).catch(() => undefined);
   }
 
+  /**
+   * Sends queued outbound messages (for example personal Setup codes) through
+   * the WhatsApp socket this process actually owns. Rows that this worker does
+   * not hold a socket for stay QUEUED, so another instance can pick them up.
+   */
+  async function flushOutbox() {
+    const queued = await prisma.whatsAppOutbox.findMany({
+      where: { status: "QUEUED" },
+      orderBy: { createdAt: "asc" },
+      take: 10,
+    });
+
+    for (const item of queued) {
+      const entry = sockets.get(item.sessionId);
+      if (!entry?.sock) continue;
+
+      const digits = String(item.to).replace(/\D/g, "");
+      if (!digits) {
+        await prisma.whatsAppOutbox.update({
+          where: { id: item.id },
+          data: { status: "FAILED", error: "Recipient has no digits", attempts: { increment: 1 } },
+        });
+        continue;
+      }
+
+      try {
+        await entry.sock.sendMessage(`${digits}@s.whatsapp.net`, { text: item.body });
+        await prisma.whatsAppOutbox.update({
+          where: { id: item.id },
+          data: { status: "SENT", sentAt: new Date(), attempts: { increment: 1 }, error: "" },
+        });
+      } catch (err) {
+        const attempts = item.attempts + 1;
+        await prisma.whatsAppOutbox.update({
+          where: { id: item.id },
+          data: {
+            attempts,
+            status: attempts >= 3 ? "FAILED" : "QUEUED",
+            error: String(err?.message || err).slice(0, 300),
+          },
+        });
+      }
+    }
+  }
+
   async function shutdown() {
     for (const id of [...sockets.keys()]) await closeSocket(id, false);
     for (const timer of retryTimers.values()) clearTimeout(timer);
     retryTimers.clear();
   }
 
-  return { reconcile, heartbeat, maintenance, shutdown, sockets, attempts };
+  return { reconcile, heartbeat, maintenance, flushOutbox, shutdown, sockets, attempts };
 }
 
 /* ---------------------------------- main ---------------------------------- */
@@ -493,6 +539,9 @@ async function main() {
   setInterval(() => {
     worker.maintenance().catch(() => undefined);
   }, MAINTENANCE_MS);
+  setInterval(() => {
+    worker.flushOutbox().catch((err) => console.error("[wa] outbox", err?.message));
+  }, OUTBOX_MS);
 
   const stop = async (signal) => {
     console.log(`[wa] ${signal} received, closing sockets`);

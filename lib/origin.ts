@@ -37,6 +37,27 @@ export function configuredOrigins(): string[] {
   return [...out];
 }
 
+/**
+ * Hosts this deployment is actually served from. Vercel injects these at build
+ * and runtime, so a preview URL works without anyone editing env vars — which
+ * is exactly the case that produces "cross-origin request blocked" on signup.
+ */
+function deploymentHosts(): string[] {
+  const keys = [
+    "VERCEL_URL",
+    "VERCEL_BRANCH_URL",
+    "VERCEL_PROJECT_PRODUCTION_URL",
+    "NEXT_PUBLIC_APP_URL",
+  ];
+  const out: string[] = [];
+  for (const key of keys) {
+    const raw = process.env[key]?.trim().toLowerCase();
+    if (!raw) continue;
+    out.push(raw.replace(/^https?:\/\//, "").replace(/\/$/, ""));
+  }
+  return out;
+}
+
 function wildcardMatches(origin: string): boolean {
   if (process.env.ALLOW_VERCEL_PREVIEWS !== "true") return false;
   const project = (process.env.VERCEL_PROJECT_PRODUCTION_URL || "").toLowerCase();
@@ -67,6 +88,7 @@ export function isAllowedOrigin(origin: string | null, host: string | null): boo
   }
 
   if (host && originHost === host) return true;
+  if (deploymentHosts().includes(originHost)) return true;
   if (configuredOrigins().includes(normalized)) return true;
   if (wildcardMatches(normalized)) return true;
 
@@ -81,9 +103,9 @@ export function isAllowedOrigin(origin: string | null, host: string | null): boo
 
 export function corsHeadersFor(origin: string | null, host: string | null): Record<string, string> {
   const headers: Record<string, string> = {
-    Vary: "Origin",
+    Vary: "Origin, Access-Control-Request-Headers",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "content-type,authorization,x-requested-with",
+    "Access-Control-Allow-Headers": "content-type,authorization,x-requested-with,x-csrf-token",
     "Access-Control-Max-Age": "600",
   };
   if (origin && isAllowedOrigin(origin, host)) {

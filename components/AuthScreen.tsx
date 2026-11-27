@@ -51,7 +51,21 @@ export default function AuthScreen({
       const path = mode === "signup" ? "/api/auth/register" : "/api/auth/login";
       const body = mode === "signup" ? { name: name.trim(), email, password } : { email, password };
       const res = await api.post<{ user: Me }>(path, body);
-      onAuthed(res.user);
+
+      // A 201 does not prove the browser accepted the session cookie. In a
+      // cross-origin deployment (separate API domain) a SameSite=Lax cookie is
+      // dropped silently, which looks like "signup did nothing". Verify before
+      // telling the user they are signed in.
+      const check = await api.get<{ user: Me | null }>("/api/auth/me").catch(() => null);
+      if (!check?.user) {
+        throw new Error(
+          mode === "signup"
+            ? "The account was created, but this browser did not store the session cookie. Serve the UI and API from the same origin (or set COOKIE_SAMESITE=none on HTTPS and add this origin to ALLOWED_ORIGINS), then sign in."
+            : "Signed in, but the session cookie was not stored. Check COOKIE_SAMESITE and ALLOWED_ORIGINS for this deployment.",
+        );
+      }
+
+      onAuthed(check.user ?? res.user);
     } catch (err) {
       const fields = fieldErrors(err);
       const first = Object.values(fields)[0];

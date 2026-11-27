@@ -20,6 +20,7 @@ Next.js 14 (App Router) · TypeScript · Prisma · PostgreSQL · zero client-sid
 | Integrations | Endpoint + header + API key. Keys are encrypted with AES-256-GCM before insert and never returned to the browser (only `sk_••••abcd`). "Test" performs a real server-side request with an 8 s timeout, records status/latency, and blocks private/loopback hosts (SSRF guard). |
 | Admin | Platform totals, 7-day signup/activity series, user search + pagination, promote/demote, suspend/reactivate (suspension revokes sessions), delete, audit log. Self-demotion and self-deletion are refused. |
 | WhatsApp | Separate system from Darknote login. Each number is its own Baileys session with a WhatsApp-issued pairing code, encrypted auth state, reconnect, uptime, logs and per-owner access control. |
+| Setup | Owner-controlled Setup access. A signed-in Nexus account plus either the owner token or a personal 8-digit setup code. Accounts are created only by the owner, activation creates an approval request, and approval links the Setup account to the main Nexus account. Server-side sessions, immediate revocation, activity log, and a live session overview. Delivery of setup codes goes through the WhatsApp outbox. |
 | Realtime | `GET /api/events` is an SSE stream scoped to the signed-in user. It combines an in-process bus with a 4 s database revision poll, so it also works when a heartbeat lands on a different serverless instance. Clients refetch on each `sync` frame; the stream reconnects automatically. |
 | Security | Origin check on every mutating request, zod validation on all input, per-IP/per-account rate limits, CSP-ish hardening headers in middleware + `vercel.json`, no secrets in the client bundle, no raw API keys in responses. |
 
@@ -216,6 +217,42 @@ curl -X POST https://<app>/api/bots/heartbeat \
 
 Status values: `ONLINE`, `OFFLINE`, `PAUSED`, `ERROR`. A disabled bot receives `403`; a revoked/unknown token receives `401`.
 
+
+## Darknote Setup (owner access)
+
+Setup is a second authorization layer on top of the normal login. It never
+replaces the Nexus session, and it is fully independent from WhatsApp: locking
+Setup or signing out of the site does not disconnect a paired bot.
+
+| Piece | Behaviour |
+| --- | --- |
+| Owner identity | An owner email (allowlist) **plus** the owner setup token. Only a bcrypt hash of the token is stored. Set `OWNER_EMAILS` / `OWNER_SETUP_TOKEN`, then rotate it in Setup → Security. |
+| Setup accounts | Created only by the owner: username, password, phone, optional display name, optional link to an existing Nexus account. |
+| Personal code | 8 random digits, bcrypt-hashed, `SETUP_CODE_TTL_HOURS` (72h) TTL, shown once. It is a reusable passkey for later visits until the owner resets it — resetting invalidates the old code and revokes live Setup sessions. |
+| Activation | First use requires username + password + code while signed in. It creates a PENDING access request and claims the account so nobody else can. |
+| Approval | Only the owner can approve/reject. Approval links the Setup account to the requesting Nexus account and activates it. |
+| Locking | Server-side idle timeout (`SETUP_IDLE_MINUTES`), explicit lock, lock on leaving the Setup view, lock when the tab is hidden for 45s. Revocation is immediate because sessions are database rows. |
+| Permissions | Every owner route calls `requireOwnerSetup()`; a normal user gets `403` even with a valid session. Setup accounts cannot create accounts, approve, or read other accounts. |
+| Delivery | A code is queued in `WhatsAppOutbox` and sent by the Baileys worker through one of the owner's connected numbers. With no connected number the account records `FAILED` with the reason and the owner can retry — it never claims a message was sent. |
+
+## Signup blocked by CORS
+
+The UI calls `/api` on its own origin by default, which is the recommended
+setup. If you split the UI and API across domains:
+
+1. `ALLOWED_ORIGINS="https://your-ui.example"` — exact origins, never `*`.
+2. `NEXT_PUBLIC_API_BASE="https://your-api.example"` on the UI build.
+3. `COOKIE_SAMESITE="none"` on the API (HTTPS only) so the session cookie can
+   be stored cross-site.
+4. `APP_URL` must be the public API origin.
+
+The origin check already accepts the deployment's own hosts (`VERCEL_URL`,
+`VERCEL_BRANCH_URL`, `VERCEL_PROJECT_PRODUCTION_URL`) and, with
+`ALLOW_VERCEL_PREVIEWS=true`, other preview hosts in the same project, so
+signup works on preview deployments without extra configuration. A blocked
+origin returns `403 CROSS_ORIGIN` with the exact fix in the message;
+`OPTIONS` preflights are answered by `middleware.ts`.
+
 ## API surface
 
 | Method | Path | Auth |
@@ -235,12 +272,21 @@ Status values: `ONLINE`, `OFFLINE`, `PAUSED`, `ERROR`. A disabled bot receives `
 | GET | `/api/admin/stats`, `/api/admin/users`, `/api/admin/audit` | admin |
 | PATCH/DELETE | `/api/admin/users/:id` | admin |
 | GET | `/api/events` | session (SSE) |
+| GET | `/api/setup/state` | session |
+| POST | `/api/setup/unlock`, `/api/setup/lock`, `/api/setup/activate` | session |
+| GET/POST | `/api/setup/accounts` | owner setup session |
+| POST/DELETE | `/api/setup/accounts/:id/actions`, `/api/setup/accounts/:id` | owner setup session |
+| GET/POST | `/api/setup/requests`, `/api/setup/requests/:id` | owner setup session |
+| GET | `/api/setup/overview`, `/api/setup/activity` | owner setup session |
+| POST | `/api/setup/owner-token` | owner (allowlisted email) |
 
 ## Tests
 
 ```bash
 npm run build && npm run start -- -p 3210
-node scripts/e2e.mjs
+node scripts/e2e.mjs        # core platform
+node scripts/e2e-setup.mjs  # Darknote Setup
+node scripts/e2e-cors.mjs   # origins / signup
 ```
 
 `npm run e2e` exercises registration validation, duplicate emails, session issuance, profile updates, bot create → code → redeem → single-use enforcement → heartbeat → logs, file upload/download/delete, SSRF rejection, encrypted integration storage + live test, RBAC, admin suspension/reactivation, persistence across logout, SSE `ready`/`sync` frames, logout, and WhatsApp session ownership/validation/restart rules. Latest run: **60/60 + 27/27 + 10/10**, plus **18/18** worker checks, the bot repository's own **174** tests and Playwright passes (desktop + mobile) with zero console errors.

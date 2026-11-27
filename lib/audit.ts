@@ -27,7 +27,24 @@ export type AuditAction =
   | "whatsapp.logout"
   | "whatsapp.delete"
   | "admin.user_update"
-  | "admin.user_delete";
+  | "admin.user_delete"
+  | "setup.owner_login"
+  | "setup.owner_denied"
+  | "setup.owner_token_rotate"
+  | "setup.login"
+  | "setup.lock"
+  | "setup.activation_failed"
+  | "setup.request_create"
+  | "setup.request_approve"
+  | "setup.request_reject"
+  | "setup.account_create"
+  | "setup.account_status"
+  | "setup.account_suspend"
+  | "setup.account_unlink"
+  | "setup.account_delete"
+  | "setup.code_reset"
+  | "setup.password_reset"
+  | "setup.sessions_revoked";
 
 export async function audit(params: {
   userId?: string | null;

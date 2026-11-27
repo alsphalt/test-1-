@@ -15,7 +15,8 @@
     "worker:test": "node scripts/test-worker.mjs",
     "worker:fixture": "node scripts/fixture-worker.mjs",
     "e2e:bot": "node scripts/e2e-bot-api.mjs",
-    "e2e:cors": "node scripts/e2e-cors.mjs"
+    "e2e:cors": "node scripts/e2e-cors.mjs",
+    "e2e:setup": "node scripts/e2e-setup.mjs"
   },
   "dependencies": {
     "@prisma/client": "5.22.0",

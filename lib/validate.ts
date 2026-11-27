@@ -152,3 +152,61 @@ export const adminUserPatchSchema = z
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+
+/* ------------------------------- Darknote Setup ------------------------------ */
+
+const setupUsername = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(3, "Username is too short")
+  .max(32, "Username is too long")
+  .regex(/^[a-z0-9][a-z0-9._-]*$/, "Use letters, numbers, dot, dash or underscore");
+
+const setupCode = z
+  .string()
+  .trim()
+  .regex(/^\d{6,12}$/, "Enter the numeric setup code");
+
+export const setupActivateSchema = z.object({
+  username: setupUsername,
+  password: z.string().min(1, "Password is required").max(200),
+  code: setupCode,
+});
+
+export const setupUnlockSchema = z
+  .object({
+    code: setupCode.optional(),
+    ownerToken: z.string().trim().min(1).max(128).optional(),
+  })
+  .refine((v) => Boolean(v.code || v.ownerToken), "Enter your setup code or the owner token");
+
+export const setupAccountCreateSchema = z.object({
+  username: setupUsername,
+  password,
+  phone: z.string().trim().min(7, "Enter a phone number with country code").max(24),
+  displayName: z.string().trim().max(60).optional(),
+  mainEmail: z.string().trim().toLowerCase().email("Enter a valid email").max(254).optional().or(z.literal("")),
+});
+
+export const setupAccountActionSchema = z.object({
+  action: z.enum([
+    "reset-code",
+    "reset-password",
+    "suspend",
+    "reactivate",
+    "unlink",
+    "revoke-sessions",
+    "delete",
+  ]),
+  password: z.string().min(1).max(200).optional(),
+});
+
+export const setupDecisionSchema = z.object({
+  decision: z.enum(["approve", "reject"]),
+});
+
+export const ownerTokenRotateSchema = z.object({
+  current: z.string().min(1).max(128),
+  next: z.string().min(6, "Use at least 6 characters").max(72),
+});

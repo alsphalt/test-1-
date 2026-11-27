@@ -6,7 +6,7 @@ import { Modal, useToast } from "./ui";
 import { api, errorMessage } from "./api";
 import type { Counts, Me } from "./types";
 
-export type View = "overview" | "bots" | "whatsapp" | "files" | "integrations" | "admin" | "account";
+export type View = "overview" | "bots" | "whatsapp" | "files" | "integrations" | "setup" | "admin" | "account";
 
 const NAV: { id: View; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -14,6 +14,7 @@ const NAV: { id: View; label: string }[] = [
   { id: "whatsapp", label: "WhatsApp" },
   { id: "files", label: "Files" },
   { id: "integrations", label: "Integrations" },
+  { id: "setup", label: "Setup" },
   { id: "account", label: "Account" },
 ];
 
