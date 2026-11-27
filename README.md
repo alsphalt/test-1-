@@ -80,26 +80,56 @@ ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='strong-pass-1' npm run db:seed
 ## Deploy to Vercel
 
 1. **Database** — create a Postgres instance (Vercel Postgres/Neon/Supabase) and copy both the pooled and direct connection strings.
-2. **Project** — import the repo (framework preset: Next.js; build command `prisma generate && next build`, already in `vercel.json`).
+2. **Project** — import the repo (framework preset: Next.js; build command `npm run vercel-build`, already in `vercel.json`). That command runs `prisma generate`, applies pending migrations, then `next build`, so the schema cannot drift behind the deployed code.
 3. **Environment variables** (Production + Preview):
 
    | Name | Value |
    | --- | --- |
    | `DATABASE_URL` | pooled Postgres URL |
-   | `DIRECT_URL` | direct Postgres URL |
+   | `DIRECT_URL` | direct Postgres URL (required for migrations) |
    | `AUTH_SECRET` | `openssl rand -base64 48` |
    | `ENCRYPTION_KEY` | `openssl rand -hex 32` |
    | `ADMIN_EMAILS` | your email(s) |
    | `APP_URL` | `https://<project>.vercel.app` |
 
-4. **Schema** — run once from your machine with the production `DIRECT_URL`:
+4. **Schema** — applied automatically by the build. To do it from your machine first (recommended once, so a bad migration never blocks a deploy):
 
    ```bash
-   DATABASE_URL="…" DIRECT_URL="…" npx prisma migrate deploy
+   DATABASE_URL="…" DIRECT_URL="…" npm run db:deploy
+   DATABASE_URL="…" DIRECT_URL="…" npm run db:verify:strict
    ```
 
 5. **Deploy** — `vercel --prod` (or push to the connected branch).
 6. **Verify** — register, create a bot, pair it, run `node scripts/bot-agent.mjs --url https://<project>.vercel.app --code <CODE>`, watch the bot flip to ONLINE and log lines appear without a reload.
+
+### "The database is connected but its tables are missing or out of date"
+
+That message is `DATABASE_SCHEMA_MISSING` from `lib/errors.ts`: the socket,
+credentials and database name are fine, but a `Prisma` query hit a table or
+column that does not exist (`P2021`/`P2022`) or migrations are out of sync
+(`P3005`/`P3009`). Nothing in the app can create tables, by design — DDL belongs
+to migrations.
+
+```bash
+# 1. What is actually missing (read-only, never prints the URL)
+DATABASE_URL="…" DIRECT_URL="…" npm run db:verify
+
+# 2. Apply every pending migration. Repeatable; drops nothing, deletes nothing.
+DATABASE_URL="…" DIRECT_URL="…" npm run db:deploy
+
+# 3. Confirm tables, columns, indexes and foreign keys
+DATABASE_URL="…" DIRECT_URL="…" npm run db:verify:strict
+```
+
+`db:deploy` is `prisma migrate deploy` plus one repair: when the tables were
+originally created with `prisma db push`, `_prisma_migrations` is empty and
+Prisma refuses to run (`P3005`). For each migration in that state the script
+checks that every table, column and index it creates already exists, and only
+then records it as applied (`prisma migrate resolve --applied`). Nothing is
+re-executed and no row is touched; if any object is missing it stops and names
+it instead of guessing. A Vercel **preview** build skips migrations unless
+`DB_MIGRATE_ALLOW_PREVIEW=true`, so a preview can never migrate the production
+database by accident.
 
 ### Platform notes
 
@@ -303,7 +333,7 @@ a specific code, so "cannot reach the database" is never ambiguous:
 | `DATABASE_NOT_FOUND` | Database name wrong | Check the path segment of `DATABASE_URL` |
 | `PRISMA_ENGINE_MISSING` | Client built for another OS | `binaryTargets` is already set; clear the build cache and redeploy |
 | `DATABASE_CLIENT_MISMATCH` | Client generated from a different schema/provider | `npx prisma generate && redeploy` |
-| `DATABASE_SCHEMA_MISSING` | Connected, tables absent | `npx prisma migrate deploy` with production `DATABASE_URL`/`DIRECT_URL` |
+| `DATABASE_SCHEMA_MISSING` | Connected, tables absent or behind | `npm run db:deploy` with production `DATABASE_URL`/`DIRECT_URL`, then `npm run db:verify` |
 | `AUTH_SECRET: missing`/`too_short` | Cookies cannot be signed | 32+ random chars (`openssl rand -base64 48`), redeploy |
 
 `ok: true` but login still fails → the credentials are wrong (`401

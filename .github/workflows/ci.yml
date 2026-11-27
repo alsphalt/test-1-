@@ -24,4 +24,7 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
       - run: npx tsc --noEmit
+      # Parses prisma/migrations and asserts the object inventory the deploy
+      # script relies on. No database needed.
+      - run: node scripts/db-deploy.mjs --selftest
       - run: npm run build
