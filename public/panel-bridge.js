@@ -135,6 +135,7 @@
     var panel = document.getElementById('pp-panel');
     if (!panel) return;
     panel.innerHTML = '<div class="pp-note">Bot: <b>' + esc(bot ? bot.name : 'none') +
+      '</b><br>Token linked: <b>' + (bot && bot.paired ? 'yes' : 'no') +
       '</b><br>Agent: <b>' + (agentOnline() ? 'online' : 'offline') +
       '</b><br>Last seen: <b>' + esc(bot && bot.lastSeenAt ? new Date(bot.lastSeenAt).toLocaleString() : 'never') +
       '</b><br>Version: <b>' + esc(bot && bot.version ? bot.version : '—') +
@@ -152,10 +153,14 @@
       if (panel) panel.innerHTML = '<div class="pp-offline">No bot is registered on this account. Create one in the website dashboard first.</div>';
       return;
     }
+    if (!agentOnline()) {
+      if (panel) panel.innerHTML = '<div class="pp-offline">Bot <b>' + esc(bot.name) +
+        '</b> is linked but the agent process is not running. Start it on its host (or restart the service); it reconnects on its own and this page updates within seconds.</div>';
+      return;
+    }
     var target = connectedSessions()[0] || state.sessions[0];
     if (!target) {
-      if (panel) panel.innerHTML = '<div class="pp-offline">The agent is ' + (agentOnline() ? 'online' : 'offline') +
-        ', but no WhatsApp number is linked yet. Add a number below — the bot process itself is started on its host.</div>';
+      if (panel) panel.innerHTML = '<div class="pp-offline">The agent is online, but no WhatsApp number is linked yet. Add a number below — the bot process itself is started on its host.</div>';
       return;
     }
     try {
@@ -213,7 +218,7 @@
 
     if (!/^\d{9,15}$/.test(num)) { out.innerHTML = '<p class="pp-err">Enter the full number with country code.</p>'; return; }
     if (!window.botLinked()) {
-      out.innerHTML = '<div class="pp-offline">No bot agent is reporting right now. Start the bot process (it links to this site with its token), then try again.</div>';
+      out.innerHTML = noAgentMessage();
       paintState();
     try { window.drawPairState(); } catch (e) {}
       return;
@@ -365,6 +370,23 @@
     } catch (e) {
       sessionStorage.removeItem('dnx-autoprovision');
     }
+  }
+
+  /** Explains exactly which link in the chain is missing. */
+  function noAgentMessage() {
+    var b = state.bots.filter(function (x) { return x.id === state.botId; })[0] || state.bots[0];
+    var text;
+    if (!b) {
+      text = 'No bot is registered on this account yet. Tap <b>Connect bot</b> (bottom-left) to create it and get the linking code.';
+    } else if (!b.paired) {
+      text = 'Bot <b>' + esc(b.name) + '</b> exists but has never been linked. Tap <b>Connect bot</b>, then put the code on the bot host as <b>NEXUS_PAIR_CODE</b> (or set NEXUS_TOKEN) and restart it.';
+    } else {
+      var age = b.lastSeenAt ? Math.round((Date.now() - Date.parse(b.lastSeenAt)) / 1000) : null;
+      text = 'Bot <b>' + esc(b.name) + '</b> is linked, but the agent has not reported' +
+        (age === null ? ' yet' : age > 60 ? ' for ' + Math.round(age / 60) + ' min' : ' for ' + age + 's') +
+        '. Start (or restart) the bot process — it reconnects by itself.';
+    }
+    return '<div class="pp-offline">' + text + '</div>';
   }
 
   function paintProvision() {
