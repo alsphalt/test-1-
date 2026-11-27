@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { diagnose } from "@/lib/errors";
+import { probeDatabase } from "@/lib/dbprobe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
  * Deployment diagnostics. Safe to expose: it reports whether configuration is
- * present and whether the database answers — never the values, connection
- * strings, credentials or user data.
+ * present and how far a database connection gets — never values, credentials,
+ * connection strings or user data. The host name is partially masked.
  */
 function presence(value: string | undefined): "set" | "missing" {
   return value && value.trim().length > 0 ? "set" : "missing";
@@ -28,67 +28,54 @@ export async function GET() {
     OWNER_EMAILS: presence(process.env.OWNER_EMAILS),
   } as const;
 
-  const database: {
-    reachable: boolean;
-    schema: boolean;
-    accounts: number | null;
-    sessions: number | null;
-    error?: string;
-    hint?: string;
-  } = { reachable: false, schema: false, accounts: null, sessions: null };
+  const probe = await probeDatabase();
 
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    database.reachable = true;
-  } catch (err) {
-    const d = diagnose(err);
-    database.error = d.code;
-    database.hint = d.hint ?? d.message;
-  }
-
-  if (database.reachable) {
+  let sessions: number | null = null;
+  if (probe.schema) {
     try {
-      database.accounts = await prisma.user.count();
-      database.schema = true;
-    } catch (err) {
-      const d = diagnose(err);
-      database.schema = false;
-      database.error = d.code;
-      database.hint = d.hint ?? d.message;
-    }
-
-    if (database.schema) {
-      try {
-        database.sessions = await prisma.session.count({
-          where: { revokedAt: null, expiresAt: { gt: new Date() } },
-        });
-      } catch {
-        /* counts are advisory only */
-      }
+      sessions = await prisma.session.count({
+        where: { revokedAt: null, expiresAt: { gt: new Date() } },
+      });
+    } catch {
+      /* advisory only */
     }
   }
 
   const warnings: string[] = [];
+  if (env.AUTH_SECRET === "missing") warnings.push("AUTH_SECRET is missing — signing in cannot work.");
+  if (env.AUTH_SECRET === "too_short") warnings.push("AUTH_SECRET is shorter than 32 characters.");
+  if (env.DATABASE_URL === "missing") {
+    warnings.push("DATABASE_URL is missing for this environment — check the Vercel variable scope (Production vs Preview).");
+  }
+  if (probe.error === "DATABASE_UNREACHABLE_TCP") {
+    warnings.push("The database host resolves but the port is closed — the project is probably paused or firewalled.");
+  }
+  if (probe.error === "DATABASE_AUTH_FAILED") {
+    warnings.push("The database rejected the credentials in DATABASE_URL.");
+  }
+  if (probe.error === "PRISMA_ENGINE_MISSING") {
+    warnings.push("The Prisma engine does not match this platform — add binaryTargets and redeploy.");
+  }
+  if (probe.query === "ok" && !probe.schema) {
+    warnings.push("The database is reachable but the tables are missing. Run: npx prisma migrate deploy");
+  }
   if (process.env.NODE_ENV === "production" && appUrl.startsWith("http://")) {
     warnings.push(
       "APP_URL is http:// in production: session cookies are marked Secure and browsers will drop them over plain HTTP.",
     );
   }
-  if (env.AUTH_SECRET === "missing") warnings.push("AUTH_SECRET is missing — signing in cannot work.");
-  if (env.AUTH_SECRET === "too_short") warnings.push("AUTH_SECRET is shorter than 32 characters.");
-  if (!database.reachable) warnings.push("The database is not reachable from this deployment.");
-  if (database.reachable && !database.schema) {
-    warnings.push("The database is reachable but the tables are missing. Run: npx prisma migrate deploy");
-  }
 
-  const ok = database.reachable && database.schema && env.AUTH_SECRET === "set";
+  const ok = probe.query === "ok" && probe.schema && env.AUTH_SECRET === "set";
 
   return NextResponse.json(
     {
       ok,
       service: "darknote-nexus",
       env,
-      database,
+      database: {
+        ...probe,
+        sessions,
+      },
       warnings,
       runtime: {
         node: process.version,

@@ -87,8 +87,9 @@ export const api = {
 };
 
 export function errorMessage(err: unknown): string {
-  // Operator-facing: a backend hint names the missing variable or migration.
-  if (err instanceof ApiError) return err.hint ? `${err.message} ${err.hint}` : err.message;
+  // Hints are for operators (server logs, /api/health). Users see the message
+  // only, so internal configuration details never reach the browser.
+  if (err instanceof ApiError) return err.message;
   if (err instanceof Error) return err.message;
   return "Something went wrong.";
 }

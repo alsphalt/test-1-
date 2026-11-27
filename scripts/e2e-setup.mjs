@@ -129,6 +129,11 @@ r = await call(owner, "POST", "/api/setup/accounts", {
 check("owner creates a Setup account", r.status === 201, `got ${r.status} ${JSON.stringify(r.data).slice(0, 120)}`);
 const setupCode = r.data?.setupCode;
 check("a personal setup code is issued", /^\d{8}$/.test(String(setupCode)), `got ${setupCode}`);
+if (r.status !== 201) {
+  console.log("\nCannot continue: the owner could not create an account (see above).");
+  if (r.status === 429) console.log("Rate limited — restart the server or wait for the window to pass.");
+  process.exit(1);
+}
 check("account starts as INVITED", r.data?.account?.status === "INVITED");
 check("delivery reports the real reason when no WhatsApp number is connected", r.data?.delivery?.queued === false && /WhatsApp/i.test(r.data?.delivery?.note || ""), r.data?.delivery?.note);
 

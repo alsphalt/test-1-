@@ -61,9 +61,10 @@ function code(r) {
 console.log(`\nAuth checks → ${BASE}\n`);
 
 let r = await call("GET", "/api/health");
+const accountsBefore = r.data?.database?.accounts ?? null;
 check("health endpoint reachable", r.status === 200, `got ${r.status} ${JSON.stringify(r.data).slice(0, 160)}`);
 if (r.status === 200) {
-  check("database reachable", r.data?.database?.reachable === true, JSON.stringify(r.data?.database));
+  check("database answers queries", r.data?.database?.query === "ok", JSON.stringify(r.data?.database));
   check("database schema present", r.data?.database?.schema === true, JSON.stringify(r.data?.database));
   check("AUTH_SECRET configured", r.data?.env?.AUTH_SECRET === "set", String(r.data?.env?.AUTH_SECRET));
 }
@@ -78,6 +79,27 @@ check(
 r = await call("GET", "/api/auth/me");
 check("session persists immediately after registration", Boolean(r.data?.user?.email === EMAIL), JSON.stringify(r.data).slice(0, 120));
 
+r = await call("POST", "/api/auth/register", { name: "Auth Tester", email: EMAIL, password: PASSWORD });
+check(
+  "duplicate email is rejected with a clear message",
+  r.status === 409 && /already exists/i.test(r.data?.error?.message || ""),
+  `got ${r.status} ${JSON.stringify(r.data)}`,
+);
+
+r = await call("POST", "/api/auth/register", {
+  name: "Long Password",
+  email: `long.${stamp}@nexus.test`,
+  password: `${"a".repeat(80)}1`,
+});
+check("passwords over 72 bytes are rejected, not truncated", r.status === 422, `got ${r.status}`);
+
+r = await call("GET", "/api/health");
+check(
+  "account is genuinely stored server-side",
+  accountsBefore === null || (typeof r.data?.database?.accounts === "number" && r.data.database.accounts > accountsBefore),
+  `before ${accountsBefore} after ${r.data?.database?.accounts}`,
+);
+
 r = await call("POST", "/api/auth/logout");
 check("logout succeeds", r.status === 200, `got ${r.status}`);
 
@@ -91,6 +113,10 @@ check("login sets an httpOnly session cookie", cookies.has("dnx_session"));
 
 r = await call("GET", "/api/auth/me");
 check("session persists after login", r.data?.user?.email === EMAIL, JSON.stringify(r.data).slice(0, 120));
+
+// Simulates a page refresh: the cookie is replayed with no other state.
+r = await call("GET", "/api/auth/me");
+check("session persists across a refresh", r.data?.user?.email === EMAIL, JSON.stringify(r.data).slice(0, 120));
 
 r = await call("POST", "/api/auth/login", { email: EMAIL, password: "DefinitelyWrong123" });
 check("wrong password returns 401 with a real message", r.status === 401 && code(r) === "INVALID_CREDENTIALS", `got ${r.status} ${code(r)}`);

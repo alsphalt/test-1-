@@ -13,7 +13,9 @@ const GENERIC = "Invalid email or password.";
 export const POST = route(async (req: Request) => {
   assertSameOrigin(req);
   const ip = clientIp(req);
-  rateLimit(`login:ip:${ip}`, 15, 5 * 60_000);
+  // Shared (NAT/carrier) IPs hit a low ceiling quickly; the per-account
+  // limit below is what actually protects an individual account.
+  rateLimit(`login:ip:${ip}`, 30, 5 * 60_000);
 
   const body = await readJson<unknown>(req);
   const { email, password } = loginSchema.parse(body);

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAllowedOrigin } from "./origin";
 import { diagnose } from "./errors";
+import { logEvent } from "./log";
 import { ZodError } from "zod";
 
 export class ApiError extends Error {
@@ -34,13 +35,32 @@ export function json<T>(data: T, status = 200, headers?: Record<string, string>)
   });
 }
 
-/** Wraps a route handler with uniform error handling. */
+type Requestish = { url?: string; method?: string };
+
+function routeInfo(args: unknown[]): { method: string; path: string } {
+  const first = args[0] as Requestish | undefined;
+  if (first && typeof first === "object" && typeof first.url === "string") {
+    try {
+      return { method: first.method ?? "GET", path: new URL(first.url).pathname };
+    } catch {
+      /* fall through */
+    }
+  }
+  return { method: "GET", path: "unknown" };
+}
+
+/** Wraps a route handler with uniform error handling + structured logging. */
 export function route<Args extends unknown[]>(
   fn: (...args: Args) => Promise<NextResponse | Response>,
 ) {
   return async (...args: Args): Promise<NextResponse | Response> => {
+    const startedAt = Date.now();
+    const info = routeInfo(args);
     try {
-      return await fn(...args);
+      const response = await fn(...args);
+      const ms = Date.now() - startedAt;
+      if (ms > 2000) logEvent("warn", "api.slow", { ...info, ms, status: response.status });
+      return response;
     } catch (err) {
       if (err instanceof ApiError) {
         return json(
@@ -61,7 +81,13 @@ export function route<Args extends unknown[]>(
         );
       }
       const diagnosed = diagnose(err);
-      console.error(`[api] ${diagnosed.code} — ${diagnosed.log}`);
+      logEvent("error", "api.error", {
+        ...info,
+        code: diagnosed.code,
+        status: diagnosed.status,
+        ms: Date.now() - startedAt,
+        detail: diagnosed.log,
+      });
       return json(
         {
           error: {

@@ -23,6 +23,10 @@ const AUDIENCE = "darknote-nexus-web";
 
 export type SessionClaims = { userId: string; sessionId: string };
 
+/**
+ * bcrypt hashes at most 72 bytes and truncates longer input, so the API
+ * validates length before calling this.
+ */
 export function hashPassword(plain: string): Promise<string> {
   return bcrypt.hash(plain, 12);
 }

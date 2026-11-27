@@ -189,3 +189,53 @@ error detector, dependency engine) lives in the **separate** `darknote-src`
 project. It was deliberately not merged into NEXUS. Porting it would be a new
 piece of work with its own verification, and it needs Pterodactyl API
 credentials to be tested for real.
+
+---
+
+## 8. Database-connection pass (2026-11-27, second run)
+
+Reported symptom: registration shows "The server cannot reach its database."
+(that string is the `DATABASE_UNAVAILABLE` message added in the previous pass).
+
+### What was found
+
+1. **No Vercel engine in the Prisma client.** The generated client shipped only
+   `libquery_engine-debian-openssl-1.1.x.so.node`, while Vercel runs Amazon
+   Linux with OpenSSL 3. That produces a `PrismaClientInitializationError` on
+   the first query — i.e. every registration and login fails at initialisation.
+   Fixed by pinning `binaryTargets = ["native", "rhel-openssl-3.0.x"]`; the
+   build now emits `libquery_engine-rhel-openssl-3.0.x.so.node` (verified).
+2. **All database faults collapsed into one message.** A paused database, a
+   wrong password, a missing variable, a schema-less database and a client built
+   for the wrong provider all returned the same text. Each now maps to its own
+   code (see README table).
+3. **bcrypt silently truncates at 72 bytes.** Verified locally:
+   `compare("a"×72, hash("a"×80 + "1")) === true`. Registration now rejects
+   passwords over 72 characters instead of accepting a weakened one.
+4. **No structured server logging.** Errors were plain `console.error` strings
+   with no route, code or timing, and no redaction. Added `lib/log.ts`.
+5. **Race on duplicate email.** The pre-check is not authoritative; a P2002 from
+   the unique index now returns the same 409 "account already exists".
+6. **Per-IP login limit was too tight for shared IPs** (15 per 5 min). Raised to
+   30 per 5 min; the per-account limit (8 per 5 min) is unchanged.
+
+### Verified locally (SQLite; PostgreSQL not available here)
+
+```
+/api/health (healthy)            ok:true, query:ok, schema:true, accounts:N
+missing DATABASE_URL             503 DATABASE_URL_MISSING
+unresolvable host                503 DATABASE_DNS_FAILED
+closed port                      503 DATABASE_UNREACHABLE_TCP
+tables absent                    503 DATABASE_SCHEMA_MISSING
+missing AUTH_SECRET              503 SERVER_MISCONFIGURED
+register → duplicate → logout → login → refresh   20/20 (scripts/e2e-auth.mjs)
+regression: core 60/60 · setup 62/62 · cors 10/10
+log redaction                    password absent from JSON logs
+```
+
+### Still requires the deployment
+
+The two remaining causes cannot be fixed from this workspace because they are
+environmental: set `DATABASE_URL` for the **Production** scope in Vercel, and
+run `npx prisma migrate deploy` against the production database. `/api/health`
+will name whichever is still wrong.

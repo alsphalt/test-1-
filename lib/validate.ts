@@ -2,10 +2,12 @@ import { z } from "zod";
 
 const email = z.string().trim().toLowerCase().email("Enter a valid email address").max(254);
 
+// bcrypt reads at most 72 bytes and silently ignores the rest, so two
+// different long passwords could compare equal. Reject the input instead.
 const password = z
   .string()
   .min(10, "Use at least 10 characters")
-  .max(200, "That password is too long")
+  .max(72, "Use at most 72 characters")
   .refine((v) => /[a-zA-Z]/.test(v) && /[0-9]/.test(v), "Include at least one letter and one number");
 
 export const registerSchema = z.object({

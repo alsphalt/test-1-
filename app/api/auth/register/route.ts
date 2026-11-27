@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { hashPassword, setSessionCookie, signSessionToken, SESSION_TTL_MS } from "@/lib/auth";
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
 export const POST = route(async (req: Request) => {
   assertSameOrigin(req);
   const ip = clientIp(req);
-  rateLimit(`register:${ip}`, 10, 10 * 60_000);
+  rateLimit(`register:${ip}`, 15, 10 * 60_000);
 
   const body = await readJson<unknown>(req);
   const { name, email, password } = registerSchema.parse(body);
@@ -21,10 +22,21 @@ export const POST = route(async (req: Request) => {
   if (existing) throw conflict("An account with that email already exists.");
 
   const role = adminEmails().includes(email) ? "ADMIN" : "USER";
-  const user = await prisma.user.create({
-    data: { name, email, passwordHash: await hashPassword(password), role },
-    select: { id: true, email: true, name: true, role: true, createdAt: true },
-  });
+
+  let user;
+  try {
+    user = await prisma.user.create({
+      data: { name, email, passwordHash: await hashPassword(password), role },
+      select: { id: true, email: true, name: true, role: true, createdAt: true },
+    });
+  } catch (error) {
+    // Two simultaneous signups can pass the pre-check. The unique index is the
+    // real authority, so return the same 409 instead of a generic database error.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      throw conflict("An account with that email already exists.");
+    }
+    throw error;
+  }
 
   const sessionId = randomUUID();
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);

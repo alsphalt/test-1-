@@ -21,15 +21,19 @@ export type Diagnosed = {
 };
 
 const PRISMA_UNREACHABLE = new Set([
-  "P1000", // authentication failed
   "P1001", // cannot reach database server
   "P1002", // timed out
-  "P1003", // database does not exist
   "P1008", // operation timed out
-  "P1010", // access denied
   "P1017", // server closed the connection
   "P2024", // pool timeout
 ]);
+
+const PRISMA_BAD_CREDENTIALS = new Set([
+  "P1000", // authentication failed
+  "P1010", // access denied
+]);
+
+const PRISMA_NO_DATABASE = new Set(["P1003"]);
 
 const PRISMA_SCHEMA = new Set([
   "P2021", // table does not exist
@@ -83,6 +87,40 @@ export function diagnose(err: unknown): Diagnosed {
   const fromConfig = configError(raw);
   if (fromConfig) return fromConfig;
 
+  if (/Environment variable not found:\s*DATABASE_URL/i.test(raw)) {
+    return {
+      status: 503,
+      code: "DATABASE_URL_MISSING",
+      message: "The server is not configured with a database URL.",
+      hint: "Set DATABASE_URL in the deployment environment for this scope (Production, not only Preview), then redeploy.",
+      log: "DATABASE_URL missing",
+    };
+  }
+
+  if (/the URL must start with the protocol `?(file|postgresql|postgres):/i.test(raw)) {
+    return {
+      status: 503,
+      code: "DATABASE_CLIENT_MISMATCH",
+      message: "The generated database client does not match this database.",
+      hint: "Run `npx prisma generate` for the schema used by this deployment, then redeploy. A build cache from a SQLite schema produces this.",
+      log: `Prisma datasource mismatch: ${raw.slice(0, 400)}`,
+    };
+  }
+
+  if (
+    /could not locate the query engine|query engine library for current platform|unable to require\(.*libquery_engine|binaryTargets/i.test(
+      raw,
+    )
+  ) {
+    return {
+      status: 503,
+      code: "PRISMA_ENGINE_MISSING",
+      message: "The deployed database engine does not match this server platform.",
+      hint: "The build generated a Prisma engine for a different OS. Add binaryTargets = [\"native\", \"rhel-openssl-3.0.x\"] to the generator block and redeploy.",
+      log: `Prisma engine mismatch: ${raw}`,
+    };
+  }
+
   if (err instanceof Prisma.PrismaClientInitializationError) {
     return {
       status: 503,
@@ -94,6 +132,24 @@ export function diagnose(err: unknown): Diagnosed {
   }
 
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    if (PRISMA_BAD_CREDENTIALS.has(err.code)) {
+      return {
+        status: 503,
+        code: "DATABASE_AUTH_FAILED",
+        message: "The database rejected the server's credentials.",
+        hint: `Prisma ${err.code}. The username or password in DATABASE_URL is wrong, or the role lacks access to this database.`,
+        log: `Prisma ${err.code}: ${raw}`,
+      };
+    }
+    if (PRISMA_NO_DATABASE.has(err.code)) {
+      return {
+        status: 503,
+        code: "DATABASE_NOT_FOUND",
+        message: "The database named in the connection URL does not exist.",
+        hint: "Check the database name at the end of DATABASE_URL.",
+        log: `Prisma ${err.code}: ${raw}`,
+      };
+    }
     if (PRISMA_UNREACHABLE.has(err.code)) {
       return {
         status: 503,

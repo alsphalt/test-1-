@@ -265,12 +265,32 @@ exposing any secret:
 - `database.reachable` and `database.schema` (plus a safe `accounts` count)
 - `warnings[]` with the exact fix
 
-| `/api/health` says | Cause | Fix |
+`/api/health` probes in stages (`dns` → `tcp` → `query` → `schema`) and returns
+a specific code, so "cannot reach the database" is never ambiguous:
+
+| `database.error` | Meaning | Fix |
 | --- | --- | --- |
-| `AUTH_SECRET: missing` or `too_short` | Session cookies cannot be signed | Set `AUTH_SECRET` to 32+ random chars (`openssl rand -base64 48`), redeploy |
-| `database.reachable: false` | Wrong/paused database, or `DATABASE_URL` absent | Check the Neon/Supabase project is running and the pooled URL is set for **Production** |
-| `database.schema: false` | Tables missing | `npx prisma migrate deploy` with `DATABASE_URL`/`DIRECT_URL` pointed at production |
-| `ok: true` but login still fails | Credentials, or the cookie is dropped | Wrong password returns `401 INVALID_CREDENTIALS`; a dropped cookie means `APP_URL` is `http://` in production or the UI/API are on different origins |
+| `DATABASE_URL_MISSING` | No URL in this environment | Set `DATABASE_URL` for **Production** (Vercel scopes variables per environment) |
+| `DATABASE_DNS_FAILED` | Hostname does not resolve | Fix the host in `DATABASE_URL` |
+| `DATABASE_UNREACHABLE_TCP` | Host resolves, port closed | Neon/Supabase project paused, IP allowlist, or database stopped |
+| `DATABASE_AUTH_FAILED` | Credentials rejected | Rotate the user/password in the connection string |
+| `DATABASE_NOT_FOUND` | Database name wrong | Check the path segment of `DATABASE_URL` |
+| `PRISMA_ENGINE_MISSING` | Client built for another OS | `binaryTargets` is already set; clear the build cache and redeploy |
+| `DATABASE_CLIENT_MISMATCH` | Client generated from a different schema/provider | `npx prisma generate && redeploy` |
+| `DATABASE_SCHEMA_MISSING` | Connected, tables absent | `npx prisma migrate deploy` with production `DATABASE_URL`/`DIRECT_URL` |
+| `AUTH_SECRET: missing`/`too_short` | Cookies cannot be signed | 32+ random chars (`openssl rand -base64 48`), redeploy |
+
+`ok: true` but login still fails → the credentials are wrong (`401
+INVALID_CREDENTIALS`) or the cookie is dropped (`APP_URL` must be `https://` in
+production; cross-origin UIs need `COOKIE_SAMESITE=none`).
+
+### Server-side logging
+
+Every failed API call writes one JSON line with `event`, `method`, `path`,
+`code`, `status`, `ms` and a redacted `detail`. Connection strings, `dnx_`
+tokens, bearer headers and `password=` values are scrubbed before writing. Users
+only ever see the clean message; hints and raw errors stay in the logs and
+`/api/health`.
 
 Login errors are now distinguishable: `401 INVALID_CREDENTIALS`,
 `403 ACCOUNT_SUSPENDED`, `422 VALIDATION_ERROR`, `503 SERVER_MISCONFIGURED`,

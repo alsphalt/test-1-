@@ -2,7 +2,10 @@
 // Portable subset: no enums / arrays so the same models run on SQLite for local verification.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // Vercel/Amazon Linux runs OpenSSL 3. Without this the runtime cannot load
+  // the query engine and every database call fails at initialisation.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
