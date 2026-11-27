@@ -77,6 +77,7 @@
     try { window.drawPairState(); } catch (e) {}
     try { window.drawRows(); } catch (e) {}
     paintProvision();
+    syncInstallCard();
     maybeProvision();
     var rows = document.getElementById('pp-rows');
     if (rows && !rows.children.length) {
@@ -389,11 +390,28 @@
   }
 
   /* ------------------------------- PWA ------------------------------------- */
-  function markInstalled() {
-    var go = document.getElementById('install-go');
+  /**
+   * The install card only exists while the app is *not* installed:
+   *  - running in standalone (launched from the home screen), or
+   *  - this browser has already completed an install (remembered locally).
+   */
+  function isInstalled() {
+    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
+    if (window.navigator.standalone === true) return true;
+    try { return localStorage.getItem('dnx-installed') === '1'; } catch (e) { return false; }
+  }
+
+  function syncInstallCard() {
     var card = document.getElementById('open-install');
-    if (go) go.textContent = 'Installed';
-    if (card) card.classList.add('installed');
+    if (!card) return;
+    var hidden = isInstalled();
+    card.hidden = hidden;
+    card.style.display = hidden ? 'none' : '';
+  }
+
+  function markInstalled() {
+    try { localStorage.setItem('dnx-installed', '1'); } catch (e) {}
+    syncInstallCard();
   }
 
   function installHelp() {
@@ -418,10 +436,7 @@
   }
 
   window.installDarknote = async function () {
-    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) {
-      markInstalled();
-      return;
-    }
+    if (isInstalled()) { syncInstallCard(); return; }
     if (state.installEvent) {
       try {
         await state.installEvent.prompt();
@@ -438,7 +453,11 @@
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
       navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
     }
-    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) markInstalled();
+    syncInstallCard();
+    if (window.matchMedia) {
+      var mq = window.matchMedia('(display-mode: standalone)');
+      if (mq.addEventListener) mq.addEventListener('change', syncInstallCard);
+    }
 
     window.addEventListener('beforeinstallprompt', function (event) {
       event.preventDefault();
