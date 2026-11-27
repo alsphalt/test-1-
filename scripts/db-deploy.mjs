@@ -105,6 +105,8 @@ function selftest() {
     "20260104000000_bot_commands": { tables: 1, columns: 0, indexes: 1 },
     "20260201000000_setup_access": { tables: 4, columns: 0, indexes: 9 },
     "20260201000100_whatsapp_outbox": { tables: 1, columns: 0, indexes: 2 },
+    // Data-only repair, no DDL: backfills placeholder externalIds.
+    "20261127120000_whatsapp_pending_external_ids": { tables: 0, columns: 0, indexes: 0 },
   };
 
   const migrations = listMigrations(MIGRATIONS_DIR);

@@ -46,8 +46,13 @@ export const POST = route(async (req: Request) => {
       phone,
       status,
       statusDetail: (item.statusDetail || "").slice(0, 300),
-      pairingCode: item.pairingCode ? item.pairingCode.slice(0, 16) : "",
-      pairingExpiresAt: item.pairingCode ? new Date(Date.now() + 60_000) : null,
+      // Only touch the code when the bot actually mentions one: a routine sync
+      // must not wipe a code the owner is still typing into their phone.
+      ...(item.pairingCode
+        ? { pairingCode: item.pairingCode.slice(0, 16), pairingExpiresAt: new Date(Date.now() + 60_000) }
+        : status === "CONNECTED"
+          ? { pairingCode: "", pairingExpiresAt: null }
+          : {}),
       meNumber: digits(item.meNumber),
       meJid: (item.meJid || "").slice(0, 140),
       platform: (item.platform || "").slice(0, 40),
@@ -56,16 +61,80 @@ export const POST = route(async (req: Request) => {
       pairError: "",
     };
 
-    await prisma.whatsAppSession.upsert({
+    /*
+     * Adopt the row the owner created in the panel.
+     *
+     * A pairing request starts life as a panel row with a `req_…` placeholder
+     * id. If the bot names the row it paired from, that row becomes the synced
+     * session: one number, one row, and the panel keeps the label the owner
+     * chose instead of gaining a duplicate.
+     */
+    const adopted =
+      (item.requestId
+        ? await prisma.whatsAppSession.findFirst({
+            where: { id: item.requestId, botId: bot.id },
+            select: { id: true, status: true },
+          })
+        : null) ||
+      // The very first sync happens before the bot has picked the request up,
+      // so it has no requestId to quote. The number itself identifies the row:
+      // one bot cannot legitimately have two pending rows for one number.
+      (phone
+        ? await prisma.whatsAppSession.findFirst({
+            where: { botId: bot.id, phone, status: "PAIRING_REQUESTED" },
+            orderBy: { createdAt: "desc" },
+            select: { id: true, status: true },
+          })
+        : null);
+
+    /*
+     * A pending request must stay visible until the bot actually issues a
+     * code. The bot's first sync already reports "PAIRING" for the number it
+     * is about to pair, and copying that over PAIRING_REQUESTED would hide the
+     * request from the pairing feed in the same response.
+     */
+    if (adopted?.status === "PAIRING_REQUESTED" && !item.pairingCode && (status === "PAIRING_CODE" || status === "CONNECTING")) {
+      delete (data as Record<string, unknown>).status;
+      delete (data as Record<string, unknown>).statusDetail;
+    }
+
+    const holder = await prisma.whatsAppSession.findUnique({
       where: { botId_externalId: { botId: bot.id, externalId } },
-      update: data,
-      create: data,
+      select: { id: true },
     });
+
+    if (adopted && (!holder || holder.id === adopted.id)) {
+      await prisma.whatsAppSession.update({ where: { id: adopted.id }, data });
+    } else {
+      // A previous row already owns this bot-side id; release it so the
+      // upsert cannot fail, and let the cleanup below remove it.
+      if (adopted && holder && holder.id !== adopted.id) {
+        await prisma.whatsAppSession.update({
+          where: { id: holder.id },
+          data: { externalId: `stale_${holder.id}` },
+        });
+      }
+      await prisma.whatsAppSession.upsert({
+        where: { botId_externalId: { botId: bot.id, externalId } },
+        update: data,
+        create: data,
+      });
+    }
   }
 
-  // Anything the bot no longer reports is gone on the bot side.
+  /*
+   * Anything the bot no longer reports is gone on the bot side — except a
+   * pairing request the owner just made, which the bot may not have picked up
+   * yet. Deleting those would make "pair from the panel" fail on the first
+   * sync.
+   */
   const removed = await prisma.whatsAppSession.deleteMany({
-    where: { botId: bot.id, source: "BOT", externalId: { notIn: seen.length ? seen : ["__none__"] } },
+    where: {
+      botId: bot.id,
+      source: "BOT",
+      status: { notIn: ["PAIRING_REQUESTED"] },
+      externalId: { notIn: seen.length ? seen : ["__none__"] },
+    },
   });
 
   await prisma.$transaction([

@@ -398,3 +398,21 @@ node scripts/e2e-auth.mjs   # register / login / logout / persistence
 ```
 
 `npm run e2e` exercises registration validation, duplicate emails, session issuance, profile updates, bot create → code → redeem → single-use enforcement → heartbeat → logs, file upload/download/delete, SSRF rejection, encrypted integration storage + live test, RBAC, admin suspension/reactivation, persistence across logout, SSE `ready`/`sync` frames, logout, and WhatsApp session ownership/validation/restart rules. Latest run: **60/60 + 27/27 + 10/10**, plus **18/18** worker checks, the bot repository's own **174** tests and Playwright passes (desktop + mobile) with zero console errors.
+
+## Linking an external bot (panel-owned pairing)
+
+The dashboard never opens a WhatsApp socket itself. An external bot keeps its own
+sessions and only talks to the panel through a bot token:
+
+1. **Bots → create** → **Pair** to get a one-time 8-character code.
+2. The bot redeems it at `POST /api/bots/pair` and stores the returned `dnx_…`.
+3. It reports every session at `POST /api/bot/v1/sync`, polls
+   `GET /api/bot/v1/pairing` for numbers the owner wants to add, and issues the
+   real WhatsApp code on its own socket.
+4. `GET /api/bot/v1/commands` delivers `RESTART` / `LOGOUT`; the bot acks each
+   one at `POST /api/bot/v1/commands/:id`.
+
+The panel keeps **one row per number**: a sync either updates the pending row the
+owner created (matched by `requestId`, or by phone on the bot's first sync) or
+creates the row when the session first appears. Pending rows are never deleted
+by a sync, so "pair from the panel" cannot race the bot.

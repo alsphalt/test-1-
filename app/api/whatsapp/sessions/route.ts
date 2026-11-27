@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { publish } from "@/lib/events";
@@ -80,6 +81,11 @@ export const POST = route(async (req: Request) => {
       label: input.label,
       phone: input.phone,
       botId: bot?.id ?? null,
+      // A pending bot session needs its own placeholder id: the empty string is
+      // shared by every waiting row and collides on (botId, externalId), which
+      // limited a bot to one pending session. The bot's sync replaces it with
+      // the bot-side session id once the number is paired.
+      externalId: bot ? `req_${randomUUID()}` : "",
       source: bot ? "BOT" : "WORKER",
       status: "PAIRING_REQUESTED",
       pairRequestedAt: bot ? new Date() : null,

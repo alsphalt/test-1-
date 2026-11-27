@@ -63,6 +63,10 @@ export const botSyncSchema = z.object({
     .array(
       z.object({
         externalId: z.string().min(1).max(120),
+        // The panel row this session was paired from. Without it the panel would
+        // keep the pending request row and create a second row for the same
+        // number on the first sync.
+        requestId: z.string().max(60).optional(),
         label: z.string().max(60).optional(),
         phone: z.string().max(20).default(""),
         status: z.string().max(24),
