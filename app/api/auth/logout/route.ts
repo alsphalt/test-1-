@@ -1,13 +1,14 @@
 import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { clearSessionCookie } from "@/lib/auth";
-import { clientIp, json, route } from "@/lib/http";
+import { assertSameOrigin, clientIp, json, route } from "@/lib/http";
 import { currentUser } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const POST = route(async (req: Request) => {
+  assertSameOrigin(req);
   const user = await currentUser();
 
   if (user) {

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { probeDatabase } from "@/lib/dbprobe";
 import { configuredOrigins } from "@/lib/origin";
 import { sessionCookieSecurity } from "@/lib/auth";
+import { secretStatus, secretsConfigured } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,15 +18,14 @@ function presence(value: string | undefined): "set" | "missing" {
 }
 
 export async function GET() {
-  const authSecret = process.env.AUTH_SECRET?.trim() ?? "";
   const appUrl = process.env.APP_URL ?? "";
 
   const allowedOrigins = configuredOrigins();
   const cookie = sessionCookieSecurity();
 
   const env = {
-    AUTH_SECRET: !authSecret ? "missing" : authSecret.length < 32 ? "too_short" : "set",
-    ENCRYPTION_KEY: presence(process.env.ENCRYPTION_KEY),
+    AUTH_SECRET: secretStatus("AUTH_SECRET"),
+    ENCRYPTION_KEY: secretStatus("ENCRYPTION_KEY"),
     DATABASE_URL: presence(process.env.DATABASE_URL),
     DIRECT_URL: presence(process.env.DIRECT_URL),
     APP_URL: presence(process.env.APP_URL),
@@ -49,8 +49,20 @@ export async function GET() {
   }
 
   const warnings: string[] = [];
-  if (env.AUTH_SECRET === "missing") warnings.push("AUTH_SECRET is missing — signing in cannot work.");
+  if (env.AUTH_SECRET === "missing") {
+    warnings.push(
+      "AUTH_SECRET is missing — signing in cannot work. If it is set in the Vercel dashboard, this deployment was built before it was added: redeploy, and confirm the variable is enabled for Production.",
+    );
+  }
   if (env.AUTH_SECRET === "too_short") warnings.push("AUTH_SECRET is shorter than 32 characters.");
+  if (env.AUTH_SECRET === "placeholder") warnings.push("AUTH_SECRET is still the example placeholder value.");
+  if (env.ENCRYPTION_KEY === "missing") {
+    warnings.push("ENCRYPTION_KEY is missing — stored integration keys cannot be decrypted.");
+  }
+  if (env.ENCRYPTION_KEY === "placeholder") warnings.push("ENCRYPTION_KEY is still the example placeholder value.");
+  if (env.AUTH_SECRET === "set" && env.ENCRYPTION_KEY === "set" && !secretsConfigured()) {
+    warnings.push("AUTH_SECRET and ENCRYPTION_KEY are identical — use two independent random values.");
+  }
   if (env.DATABASE_URL === "missing") {
     warnings.push("DATABASE_URL is missing for this environment — check the Vercel variable scope (Production vs Preview).");
   }
@@ -72,7 +84,8 @@ export async function GET() {
     );
   }
 
-  const ok = probe.query === "ok" && probe.schema && env.AUTH_SECRET === "set";
+  const ok =
+    probe.query === "ok" && probe.schema && env.AUTH_SECRET === "set" && env.ENCRYPTION_KEY === "set";
 
   if (cookie.sameSite === "lax" && process.env.COOKIE_SAMESITE?.toLowerCase() === "none") {
     warnings.push("COOKIE_SAMESITE=none was requested but this deployment is not HTTPS; using lax.");
@@ -104,6 +117,24 @@ export async function GET() {
         node: process.version,
         env: process.env.NODE_ENV ?? "unknown",
         region: process.env.VERCEL_REGION ?? null,
+      },
+      /**
+       * Which build answered this request. Without it there is no way to tell
+       * "the variable is missing" from "this is the deployment that was built
+       * before the variable existed" — the single most common cause of a
+       * correct-looking configuration still reading as empty.
+       */
+      deployment: {
+        commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) ?? null,
+        id: process.env.VERCEL_DEPLOYMENT_ID ?? null,
+        target: process.env.VERCEL_TARGET_ENV ?? process.env.VERCEL_ENV ?? null,
+        branch: process.env.VERCEL_GIT_COMMIT_REF ?? null,
+        host: process.env.VERCEL_URL ?? null,
+      },
+      secrets: {
+        // Presence only. Two independent values are required.
+        bothPresent: env.AUTH_SECRET === "set" && env.ENCRYPTION_KEY === "set",
+        distinct: secretsConfigured(),
       },
       at: new Date().toISOString(),
     },

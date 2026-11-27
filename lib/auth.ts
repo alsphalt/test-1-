@@ -76,6 +76,17 @@ export async function signSessionToken(claims: SessionClaims, expiresAt: Date): 
     .sign(authSecret());
 }
 
+/**
+ * A missing or unusable secret is a deployment fault, not a bad session.
+ * Without this split the catch below would turn "AUTH_SECRET is not
+ * configured" into a silent null and every request would look like an
+ * ordinary 401, which is exactly how a misconfiguration hides for days.
+ */
+export function isSecretConfigError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /^(AUTH_SECRET|ENCRYPTION_KEY)\b/.test(message);
+}
+
 export async function verifySessionToken(token: string): Promise<SessionClaims | null> {
   try {
     const { payload } = await jwtVerify(token, authSecret(), {
@@ -87,7 +98,9 @@ export async function verifySessionToken(token: string): Promise<SessionClaims |
     const sessionId = payload.sid;
     if (typeof userId !== "string" || typeof sessionId !== "string") return null;
     return { userId, sessionId };
-  } catch {
+  } catch (err) {
+    if (isSecretConfigError(err)) throw err;
+    // Expired, tampered or foreign-signed: treat as "no session".
     return null;
   }
 }

@@ -79,6 +79,43 @@ function configError(message: string): Diagnosed | null {
       log: "ENCRYPTION_KEY invalid",
     };
   }
+  if (/AUTH_SECRET and ENCRYPTION_KEY must not be the same value/i.test(message)) {
+    return {
+      status: 503,
+      code: "SERVER_MISCONFIGURED",
+      message: "AUTH_SECRET and ENCRYPTION_KEY are the same value.",
+      hint: "Use two independent random values: openssl rand -base64 48 for AUTH_SECRET and openssl rand -hex 32 for ENCRYPTION_KEY.",
+      log: "AUTH_SECRET === ENCRYPTION_KEY",
+    };
+  }
+  if (/(AUTH_SECRET|ENCRYPTION_KEY) is still the example placeholder/i.test(message)) {
+    return {
+      status: 503,
+      code: "SERVER_MISCONFIGURED",
+      message: "A secret is still set to the example placeholder value.",
+      hint: "Replace it with a freshly generated random value, then redeploy.",
+      log: "Secret is a placeholder",
+    };
+  }
+  /**
+   * AES-GCM authentication failure. Either the value was written with a
+   * different ENCRYPTION_KEY (rotated, or a per-scope variable that differs
+   * between Production and Preview) or the stored ciphertext is damaged.
+   * Saying so is safe: it reveals no key material.
+   */
+  if (
+    /unable to authenticate data|unsupported state or unable to authenticate|bad decrypt|Malformed ciphertext/i.test(
+      message,
+    )
+  ) {
+    return {
+      status: 503,
+      code: "SECRETS_UNREADABLE",
+      message: "Stored encrypted values cannot be decrypted with the current ENCRYPTION_KEY.",
+      hint: "The key changed after the values were saved. Restore the previous ENCRYPTION_KEY, or re-enter the stored integration keys.",
+      log: "ENCRYPTION_KEY does not match stored ciphertext",
+    };
+  }
   return null;
 }
 
