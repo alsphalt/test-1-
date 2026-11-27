@@ -77,6 +77,7 @@
     try { window.drawPairState(); } catch (e) {}
     try { window.drawRows(); } catch (e) {}
     paintProvision();
+    maybeProvision();
     var rows = document.getElementById('pp-rows');
     if (rows && !rows.children.length) {
       var pairs = window.activePairs ? window.activePairs() : [];
@@ -216,7 +217,11 @@
     try { window.drawPairState(); } catch (e) {}
       return;
     }
-    if (!state.botId) { out.innerHTML = '<div class="pp-offline">Create a bot in the dashboard first.</div>'; return; }
+    if (!state.botId) {
+      out.innerHTML = '<div class="pp-offline">No bot is registered on this account yet. Tap <b>Connect bot</b> (bottom-left) to create it and get the linking code.</div>';
+      paintProvision();
+      return;
+    }
     if (window.activePairs().some(function (x) { return x.num === num; })) {
       out.innerHTML = '<p class="pp-err">+' + esc(num) + ' is already paired.</p>';
       return;
@@ -346,6 +351,19 @@
       }).catch(function () {});
     };
     document.getElementById('nx-close').onclick = function () { box.remove(); };
+  }
+
+  var autoProvisioned = false;
+  async function maybeProvision() {
+    if (!state.me || state.bots.length > 0 || autoProvisioned) return;
+    if (sessionStorage.getItem('dnx-autoprovision') === '1') return;
+    autoProvisioned = true;
+    sessionStorage.setItem('dnx-autoprovision', '1');
+    try {
+      await window.provisionBot();
+    } catch (e) {
+      sessionStorage.removeItem('dnx-autoprovision');
+    }
   }
 
   function paintProvision() {
