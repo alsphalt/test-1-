@@ -76,6 +76,7 @@
     paintState();
     try { window.drawPairState(); } catch (e) {}
     try { window.drawRows(); } catch (e) {}
+    paintProvision();
     var rows = document.getElementById('pp-rows');
     if (rows && !rows.children.length) {
       var pairs = window.activePairs ? window.activePairs() : [];
@@ -301,6 +302,59 @@
     if (btn) setTimeout(function () { rebind(); refresh(); }, 60);
   });
 
+  /* --------------------------- bot provisioning ---------------------------- */
+  /* The deployed page has no dashboard routes, so a signed-in owner can create
+     the bot record and get a one-time code here. The code is redeemed by the
+     operator on the bot host; the token is never rendered in the page. */
+  window.provisionBot = async function () {
+    try {
+      var bot = state.bots[0];
+      if (!bot) {
+        var created = await api('/api/bots', {
+          method: 'POST',
+          body: JSON.stringify({ name: 'DARKNOTE bot', description: 'Provisioned from the panel' })
+        });
+        bot = created.bot;
+      }
+      var pair = await api('/api/bots/' + bot.id + '/pair', { method: 'POST' });
+      await refresh();
+      showCode(pair.code, pair.expiresAt);
+    } catch (e) {
+      alert('Could not create the bot: ' + e.message);
+    }
+  };
+
+  function showCode(code, expiresAt) {
+    var existing = document.getElementById('nx-provision');
+    if (existing) existing.remove();
+    var box = document.createElement('div');
+    box.id = 'nx-provision';
+    box.style.cssText = 'position:fixed;inset:0;z-index:80;display:grid;place-items:center;background:rgba(0,0,0,.82);padding:20px;font-family:Inter,system-ui,sans-serif';
+    var when = expiresAt ? new Date(expiresAt).toLocaleTimeString() : 'in 10 minutes';
+    box.innerHTML =
+      '<div style="max-width:380px;background:#120a0e;border:1px solid rgba(255,122,200,.35);border-radius:16px;padding:20px;color:#fff;text-align:center">' +
+        '<div style="font:700 12px Orbitron,Inter,sans-serif;letter-spacing:.14em;color:#ff7ac8;margin-bottom:10px">BOT PAIRING CODE</div>' +
+        '<div style="font:800 30px Orbitron,Inter,monospace;letter-spacing:.18em;padding:12px;border:1px dashed rgba(255,122,200,.5);border-radius:10px">' + esc(code) + '</div>' +
+        '<p style="font-size:12px;line-height:1.6;color:#b0b0bb;margin:12px 0 0">Send this code to your operator. It lets the bot authenticate to this site; it expires ' + esc(when) + ' and can be reissued.</p>' +
+        '<button id="nx-copy" style="margin-top:14px;border:0;border-radius:9px;padding:10px 16px;background:linear-gradient(90deg,#ff2e4d,#ff7ac8);color:#fff;font-weight:700;cursor:pointer">Copy code</button>' +
+        '<button id="nx-close" style="margin-top:14px;margin-left:8px;border:1px solid rgba(255,255,255,.25);border-radius:9px;padding:10px 16px;background:none;color:#fff;cursor:pointer">Close</button>' +
+      '</div>';
+    document.body.appendChild(box);
+    document.getElementById('nx-copy').onclick = function () {
+      navigator.clipboard.writeText(code).then(function () {
+        document.getElementById('nx-copy').textContent = 'Copied';
+      }).catch(function () {});
+    };
+    document.getElementById('nx-close').onclick = function () { box.remove(); };
+  }
+
+  function paintProvision() {
+    var btn = document.getElementById('pp-connect');
+    if (!btn) return;
+    // Show whenever no agent is reporting, so a lost/rotated token can be re-linked.
+    btn.hidden = !state.me || window.botLinked();
+  }
+
   /* ------------------------------ live updates ----------------------------- */
   function startStream() {
     if (state.es) return;
@@ -333,6 +387,16 @@
   /* -------------------------------- boot ----------------------------------- */
   async function boot() {
     installPwa();
+    if (!document.getElementById('pp-connect')) {
+      var b = document.createElement('button');
+      b.id = 'pp-connect';
+      b.type = 'button';
+      b.textContent = 'Connect bot';
+      b.hidden = true;
+      b.style.cssText = 'position:fixed;left:14px;bottom:14px;z-index:60;border:1px solid rgba(255,122,200,.5);border-radius:999px;padding:11px 16px;background:rgba(20,6,12,.92);color:#fff;font:700 12px Inter,system-ui,sans-serif;letter-spacing:.06em;cursor:pointer';
+      b.onclick = function () { window.provisionBot(); };
+      document.body.appendChild(b);
+    }
     var me = await api('/api/auth/me').catch(function () { return null; });
     if (me && me.user) {
       enterApp(me.user);
