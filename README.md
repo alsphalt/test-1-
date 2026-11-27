@@ -153,6 +153,9 @@ and path.
 
 Trusted origins are resolved in this order — no wildcard is ever needed:
 
+0. the product's own domains, built in (`v0-bigbrother.vercel.app`,
+   `test-1-three-opal.vercel.app`; override with `PROJECT_ORIGINS`, or set it to
+   an empty string to disable),
 1. the origin the request was served from (`req.nextUrl.origin`),
 2. the `Host` / `X-Forwarded-Host` being requested,
 3. `APP_URL`,

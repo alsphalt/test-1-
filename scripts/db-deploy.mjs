@@ -47,6 +47,35 @@ function redact(text) {
   return text.replace(/postgres(ql)?:\/\/[^\s"']+/gi, "postgresql://[redacted]");
 }
 
+/**
+ * Neon exposes a pooled endpoint (`ep-xxx-pooler.<region>.aws.neon.tech`) for
+ * the app and the same database directly (`ep-xxx.<region>.aws.neon.tech`) for
+ * DDL. PgBouncer cannot run the migration engine's statements, so a deployment
+ * that only sets DATABASE_URL fails its build with a DDL error and never
+ * deploys — which looks like "the site ignores my push".
+ *
+ * The direct hostname is the pooled one without the `-pooler` label; deriving
+ * it is safe (same host, same credentials) and only used when DIRECT_URL is
+ * genuinely unset.
+ */
+export function deriveNeonDirectUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    if (!parsed.hostname.endsWith(".neon.tech")) return "";
+    if (!parsed.hostname.includes("-pooler.")) return "";
+    parsed.hostname = parsed.hostname.replace("-pooler.", ".");
+    // pgbouncer flags belong to the pooled connection only.
+    parsed.searchParams.delete("pgbouncer");
+    parsed.searchParams.delete("connection_limit");
+    parsed.searchParams.delete("pool_timeout");
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
 function fail(message, detail = "") {
   say(`\n\u2716 ${message}`);
   if (detail) say(redact(detail).split("\n").map((l) => `  ${l}`).join("\n"));
@@ -111,6 +140,17 @@ function selftest() {
 
   const migrations = listMigrations(MIGRATIONS_DIR);
   const problems = [];
+
+  // Direct-URL derivation: pooled Neon host → direct host, everything else untouched.
+  const pooler = "postgresql://u:p@ep-cool-1234-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require&pgbouncer=true";
+  const direct = "postgresql://u:p@ep-cool-1234.us-east-2.aws.neon.tech/neondb?sslmode=require";
+  if (deriveNeonDirectUrl(pooler) !== direct) {
+    problems.push(`deriveNeonDirectUrl(pooled) → ${deriveNeonDirectUrl(pooler) || "(empty)"}, expected ${direct}`);
+  }
+  if (deriveNeonDirectUrl(direct) !== "") problems.push("deriveNeonDirectUrl(direct) should return an empty string");
+  if (deriveNeonDirectUrl("postgresql://u:p@db.example.com/app") !== "") {
+    problems.push("deriveNeonDirectUrl(non-Neon) should return an empty string");
+  }
   let tables = 0;
   let indexes = 0;
 
@@ -160,9 +200,16 @@ if (!process.env.DATABASE_URL?.trim() && !process.env.DIRECT_URL?.trim()) {
 }
 
 if (!process.env.DIRECT_URL?.trim()) {
-  process.env.DIRECT_URL = process.env.DATABASE_URL;
-  say("· DIRECT_URL is not set — falling back to DATABASE_URL for migrations.");
-  say("  A pooled (PgBouncer) URL can reject DDL; if migration fails, set DIRECT_URL.");
+  const derived = deriveNeonDirectUrl(process.env.DATABASE_URL);
+  if (derived) {
+    process.env.DIRECT_URL = derived;
+    say("· DIRECT_URL is not set — derived the Neon direct endpoint from DATABASE_URL.");
+    say("  Set DIRECT_URL explicitly in Vercel to make this independent of the hostname.");
+  } else {
+    process.env.DIRECT_URL = process.env.DATABASE_URL;
+    say("· DIRECT_URL is not set — falling back to DATABASE_URL for migrations.");
+    say("  A pooled (PgBouncer) URL can reject DDL; if migration fails, set DIRECT_URL.");
+  }
 }
 
 if (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== "production" && process.env.DB_MIGRATE_ALLOW_PREVIEW !== "true") {

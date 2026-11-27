@@ -22,9 +22,39 @@ function normalize(origin: string): string {
   }
 }
 
+/**
+ * The product's own front doors.
+ *
+ * Both hostnames serve this application and share one database, so a request
+ * from one to the other is same-product, not third-party. They are listed
+ * explicitly — never a wildcard — because the session cookie travels with the
+ * request.
+ *
+ * Without this, trust depended on which deployment happened to know the other
+ * host through Vercel's env vars: `test-1-three-opal` accepted `v0-bigbrother`
+ * while `v0-bigbrother` rejected `test-1-three-opal` with 403 CROSS_ORIGIN.
+ * Set PROJECT_ORIGINS="" to opt out and rely on APP_URL/ALLOWED_ORIGINS only.
+ */
+const BUILT_IN_ORIGINS = [
+  "https://v0-bigbrother.vercel.app",
+  "https://test-1-three-opal.vercel.app",
+];
+
+function projectOrigins(): string[] {
+  const override = process.env.PROJECT_ORIGINS;
+  if (override !== undefined) {
+    return override
+      .split(/[,\s]+/)
+      .map(normalize)
+      .filter(Boolean);
+  }
+  return BUILT_IN_ORIGINS;
+}
+
 /** Exact origins from APP_URL + ALLOWED_ORIGINS. */
 export function configuredOrigins(): string[] {
   const out = new Set<string>();
+  for (const origin of projectOrigins()) out.add(origin);
   const app = process.env.APP_URL;
   if (app) {
     const norm = normalize(app);
@@ -55,12 +85,19 @@ function deploymentHosts(): string[] {
 }
 
 function wildcardMatches(origin: string): boolean {
+  // Opt-in. A preview build served from its own host is already covered by the
+  // Host comparison above; this only matters when a preview UI calls a
+  // different deployment's API. It is a hostname prefix, not proof of
+  // ownership, so it stays off unless the operator asks for it.
   if (process.env.ALLOW_VERCEL_PREVIEWS !== "true") return false;
-  const project = (process.env.VERCEL_PROJECT_PRODUCTION_URL || "").toLowerCase();
+  const project = (process.env.VERCEL_PROJECT_PRODUCTION_URL || "").toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
   if (!project) return false;
   try {
     const host = new URL(origin).hostname.toLowerCase();
-    return host.endsWith(".vercel.app") && host.startsWith(project.split(".")[0]);
+    // Same project only: <project>.vercel.app or <project>-<branch|hash>.vercel.app
+    // (`evil-<project>` or `<project>-attacker` in another account do not match).
+    const prefix = project.split(".")[0];
+    return host === `${prefix}.vercel.app` || (host.startsWith(`${prefix}-`) && host.endsWith(".vercel.app"));
   } catch {
     return false;
   }
