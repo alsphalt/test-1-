@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  var state = { me: null, bots: [], sessions: [], botId: null, es: null, busy: false };
+  var state = { me: null, bots: [], sessions: [], botId: null, es: null, busy: false, installEvent: null };
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
   var esc = window.esc || function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); };
 
@@ -371,16 +371,80 @@
   }
 
   /* ------------------------------- PWA ------------------------------------- */
+  function markInstalled() {
+    var go = document.getElementById('install-go');
+    var card = document.getElementById('open-install');
+    if (go) go.textContent = 'Installed';
+    if (card) card.classList.add('installed');
+  }
+
+  function installHelp() {
+    var existing = document.getElementById('nx-install-help');
+    if (existing) existing.remove();
+    var ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    var box = document.createElement('div');
+    box.id = 'nx-install-help';
+    box.style.cssText = 'position:fixed;inset:0;z-index:80;display:grid;place-items:center;background:rgba(0,0,0,.82);padding:20px;font-family:Inter,system-ui,sans-serif';
+    box.innerHTML =
+      '<div style="max-width:380px;background:#120a0e;border:1px solid rgba(255,122,200,.35);border-radius:16px;padding:20px;color:#fff">' +
+        '<div style="font:700 12px Orbitron,Inter,sans-serif;letter-spacing:.14em;color:#ff7ac8;margin-bottom:10px">INSTALL DARKNOTE</div>' +
+        '<p style="font-size:13px;line-height:1.65;color:#c9c9d2;margin:0">' +
+          (ios
+            ? 'On iPhone/iPad with Safari: tap <b>Share</b>, then <b>Add to Home Screen</b>. It opens full screen with the Darknote icon.'
+            : 'Open the browser menu and choose <b>Install app</b> (Chrome/Edge) or <b>Add to Home screen</b> (Firefox). If the entry is missing, reload the page once and try again.') +
+        '</p>' +
+        '<button id="nx-install-close" style="margin-top:14px;border:0;border-radius:9px;padding:10px 16px;background:linear-gradient(90deg,#ff2e4d,#ff7ac8);color:#fff;font-weight:700;cursor:pointer">Got it</button>' +
+      '</div>';
+    document.body.appendChild(box);
+    document.getElementById('nx-install-close').onclick = function () { box.remove(); };
+  }
+
+  window.installDarknote = async function () {
+    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) {
+      markInstalled();
+      return;
+    }
+    if (state.installEvent) {
+      try {
+        await state.installEvent.prompt();
+        var choice = await state.installEvent.userChoice;
+        state.installEvent = null;
+        if (choice && choice.outcome === 'accepted') markInstalled();
+        return;
+      } catch (e) { /* fall through to help */ }
+    }
+    installHelp();
+  };
+
   function installPwa() {
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
       navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
     }
+    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) markInstalled();
+
     window.addEventListener('beforeinstallprompt', function (event) {
       event.preventDefault();
-      var btn = document.getElementById('pp-install');
-      if (!btn) return;
-      btn.hidden = false;
-      btn.onclick = function () { btn.hidden = true; event.prompt(); };
+      state.installEvent = event;
+      var go = document.getElementById('install-go');
+      if (go) go.textContent = 'Install →';
+    });
+    window.addEventListener('appinstalled', function () {
+      state.installEvent = null;
+      markInstalled();
+    });
+
+    document.addEventListener('click', function (event) {
+      var card = event.target.closest && event.target.closest('#open-install');
+      if (!card) return;
+      event.preventDefault();
+      window.installDarknote();
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      var card = event.target.closest && event.target.closest('#open-install');
+      if (!card) return;
+      event.preventDefault();
+      window.installDarknote();
     });
   }
 

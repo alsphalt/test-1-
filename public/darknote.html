@@ -690,7 +690,6 @@ footer span{color:var(--red2)}
 <meta name="apple-mobile-web-app-title" content="Darknote">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="icon" href="/icons/favicon-32.png" sizes="32x32">
-<style>#pp-install{position:fixed;right:14px;bottom:14px;z-index:60;border:0;border-radius:999px;padding:11px 16px;background:linear-gradient(90deg,#ff2e4d,#ff7ac8);color:#fff;font:700 12px Inter,system-ui,sans-serif;letter-spacing:.06em;box-shadow:0 12px 30px rgba(255,46,77,.35);cursor:pointer}</style>
 </head>
 <body class="locked">
 
@@ -797,6 +796,7 @@ footer span{color:var(--red2)}
 <div class="card tap bot-card" id="open-bots" role="button" tabindex="0"><svg class="bc-ic" viewBox="0 0 120 120" aria-hidden="true"><line x1="60" y1="10" x2="60" y2="24"/><circle class="bc-eye" cx="60" cy="8" r="4"/><rect x="22" y="24" width="76" height="60" rx="16"/><circle class="bc-eye" cx="45" cy="54" r="7"/><circle class="bc-eye" cx="75" cy="54" r="7"/><line x1="42" y1="70" x2="78" y2="70"/><rect x="34" y="90" width="52" height="22" rx="8"/></svg><h3>DARKNOTE BOTS</h3><p>One command center for all your bots.</p><span class="go">Enter →</span></div>
 <div class="card"><i></i><h3>Section Two</h3><p>Replace this with your own content.</p></div>
 <div class="card tap" id="open-s3" role="button" tabindex="0"><i></i><h3>Darknote Setups</h3><p>Your live dashboard.</p><span class="go">Open →</span></div>
+<div class="card tap install-card" id="open-install" role="button" tabindex="0"><i></i><h3>Install app</h3><p>Add Darknote to your home screen.</p><span class="go" id="install-go">Install →</span></div>
 </section>
 
 <footer>© <b>Darknote</b> · <a href="#" id="foot-contact" class="ct-link">Contact</a> · Powered by <span>Jimmy Mtech</span></footer>
@@ -2745,7 +2745,6 @@ window.addEventListener('resize',function(){ if(document.body.contains(intro)){b
 if(document.fonts&&document.fonts.ready){document.fonts.ready.then(start);}else{start();}
 })();
 </script>
-<button id="pp-install" type="button" hidden>Install app</button>
 <script src="/panel-bridge.js"></script>
 </body>
 </html>
