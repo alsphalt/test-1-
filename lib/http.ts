@@ -146,7 +146,13 @@ export function assertSameOrigin(req: Request): void {
   if (!origin) return; // non-browser client (curl, bot heartbeat) — auth still applies
 
   const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
-  if (!isAllowedOrigin(origin, host)) {
+  let selfOrigin: string | null = null;
+  try {
+    selfOrigin = new URL(req.url).origin;
+  } catch {
+    /* relative request URL — host comparison is enough */
+  }
+  if (!isAllowedOrigin(origin, host, selfOrigin)) {
     throw new ApiError(
       403,
       "CROSS_ORIGIN",

@@ -111,20 +111,46 @@ ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='strong-pass-1' npm run db:seed
 ## Cross-origin setup (the "Cross-origin request blocked" fix)
 
 The UI calls `/api/...` on the same origin, so a normal deploy needs no CORS
-configuration at all. When a preview/custom domain must call the API directly:
+configuration at all. Only split deployments (separate API domain, or a preview
+host calling the production API) need it.
 
-1. Add the exact origin to `ALLOWED_ORIGINS` (comma separated). No wildcards —
-   the session cookie travels with the request.
-2. If the UI lives on a different host, set `NEXT_PUBLIC_API_BASE` to the API
-   origin; the client then uses `credentials: "include"`.
-3. Cross-site cookies require `COOKIE_SAMESITE=none` **and** HTTPS.
-4. `OPTIONS` is answered by middleware with `Access-Control-Allow-Origin: <exact
-   origin>`, `Allow-Credentials: true`, and the method/header lists; state-changing
-   requests from unknown origins are rejected with `403 CROSS_ORIGIN` before any
-   handler runs.
+**Why the browser used to say only "cross-origin request blocked":** a rejected
+origin got `403` without `Access-Control-Allow-Origin`, so the browser discarded
+the body and DevTools never showed the reason. The rejection now echoes the
+origin (without credentials) so the JSON is readable and names the exact value
+to add. Every rejection is also logged as `cors.rejected` with the origin, host
+and path.
 
-Preferred topology is a same-origin `/api` proxy, which avoids the cookie rules
-entirely.
+Trusted origins are resolved in this order — no wildcard is ever needed:
+
+1. the origin the request was served from (`req.nextUrl.origin`),
+2. the `Host` / `X-Forwarded-Host` being requested,
+3. `APP_URL`,
+4. exact entries in `ALLOWED_ORIGINS`,
+5. the deployment's own Vercel hosts (`VERCEL_URL`, `VERCEL_BRANCH_URL`,
+   `VERCEL_PROJECT_PRODUCTION_URL`),
+6. `*.vercel.app` in the same project when `ALLOW_VERCEL_PREVIEWS=true`.
+
+### v0 preview
+
+- Prefer the same-origin API: leave `NEXT_PUBLIC_API_BASE` unset and call
+  relative `/api/...`. If the variable points at the page's own origin it is
+  ignored, so the request never enters CORS.
+- If the preview must call a different deployment, add the **preview origin**
+  (the one in the browser address bar or the v0 iframe) to `ALLOWED_ORIGINS`,
+  and set `COOKIE_SAMESITE=none` on the API. `SameSite=None` requires HTTPS; if
+  the deployment is not HTTPS the server downgrades to `lax` and logs
+  `cookie.samesite_downgraded` instead of sending a cookie the browser discards.
+- If v0 renders the app inside an iframe and the frame stays blank, set
+  `FRAME_ANCESTORS="'self' https://*.v0.app"`. A non-default value replaces
+  `X-Frame-Options: DENY` with a CSP `frame-ancestors` policy.
+
+### Checking a deployment
+
+`GET /api/health` reports `cors.allowedOrigins`, `cors.frameAncestors` and the
+effective cookie flags (`httpOnly`, `sameSite`, `secure`), so a mismatch is
+visible without guessing. `OPTIONS` preflights reflect the requested method and
+headers, so an extra header such as `x-csrf-token` is not rejected.
 
 ## Bot agent API (external bot integration)
 

@@ -239,3 +239,62 @@ The two remaining causes cannot be fixed from this workspace because they are
 environmental: set `DATABASE_URL` for the **Production** scope in Vercel, and
 run `npx prisma migrate deploy` against the production database. `/api/health`
 will name whichever is still wrong.
+
+---
+
+## 9. Cross-origin pass (2026-11-27, third run)
+
+Reported: registration shows "Cross-origin request blocked."
+
+### Exact cause
+
+`middleware.ts` rejected a disallowed origin with `403` **and no
+`Access-Control-Allow-Origin`**. A browser is required to discard the response
+body in that case, so the app's explanatory JSON was unreadable and all the
+developer saw was a generic CORS failure. The request was being rejected
+correctly; the reason was being thrown away.
+
+Secondary, real-world contributors found while fixing it:
+
+- **Proxy hosts.** The check compared the `Origin` host to `Host`/
+  `X-Forwarded-Host` only. Behind a proxy or v0 sandbox those can differ from the
+  public origin, rejecting the app's own page. `req.nextUrl.origin` is now
+  trusted as well.
+- **Preflight shape.** `OPTIONS` always answered with a fixed method/header
+  list, so any request carrying an extra header failed preflight even from an
+  allowed origin. It now reflects the requested method and headers.
+- **Framing.** `X-Frame-Options: DENY` is unconditional, which blanks an app
+  embedded in a v0 preview iframe. `FRAME_ANCESTORS` now emits a CSP
+  `frame-ancestors` policy when a list is needed.
+- **Cookies.** `SameSite=None` was emitted even without HTTPS, where browsers
+  drop the cookie — a login that returns 200 but loses its session. The policy
+  now derives `secure` from the deployment scheme and downgrades `none` → `lax`
+  with a log line when the two conflict.
+- **Client base URL.** `NEXT_PUBLIC_API_BASE` pointing at the page's own origin
+  forced a needless CORS round trip; it is now ignored in that case.
+
+### Verified locally
+
+```
+preflight allowed origin        204 + echoed origin + credentials + method + headers
+preflight extra header          reflected, not rejected
+preflight blocked origin        no ACAO grant, no credentials
+blocked POST                    403 + readable JSON naming the exact origin
+cors.rejected log               {"origin":...,"host":...,"path":...}
+frame default                   X-Frame-Options: DENY
+frame override                  CSP frame-ancestors 'self' https://*.v0.app
+session cookie                  HttpOnly + SameSite + Path=/
+/api/health                     cors.allowedOrigins, frameAncestors, cookie flags
+regression                      cors 18/18 · auth 20/20 · core 60/60 · setup 62/62
+```
+
+Node's `fetch` does not enforce CORS, so these are header-level assertions
+matching the browser's decision rules; no real browser was available here.
+
+### Requires the deployment
+
+- Add the exact preview origin (v0 or otherwise) to `ALLOWED_ORIGINS` — the new
+  403 body and `cors.rejected` log both name it.
+- For cross-site cookies: `COOKIE_SAMESITE=none` on an HTTPS deployment.
+- For an embedded preview: `FRAME_ANCESTORS="'self' https://*.v0.app"`.
+

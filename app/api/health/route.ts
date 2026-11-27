@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { probeDatabase } from "@/lib/dbprobe";
+import { configuredOrigins } from "@/lib/origin";
+import { sessionCookieSecurity } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +20,9 @@ export async function GET() {
   const authSecret = process.env.AUTH_SECRET?.trim() ?? "";
   const appUrl = process.env.APP_URL ?? "";
 
+  const allowedOrigins = configuredOrigins();
+  const cookie = sessionCookieSecurity();
+
   const env = {
     AUTH_SECRET: !authSecret ? "missing" : authSecret.length < 32 ? "too_short" : "set",
     ENCRYPTION_KEY: presence(process.env.ENCRYPTION_KEY),
@@ -26,6 +31,8 @@ export async function GET() {
     APP_URL: presence(process.env.APP_URL),
     ADMIN_EMAILS: presence(process.env.ADMIN_EMAILS),
     OWNER_EMAILS: presence(process.env.OWNER_EMAILS),
+    FRAME_ANCESTORS: presence(process.env.FRAME_ANCESTORS),
+    COOKIE_SAMESITE: presence(process.env.COOKIE_SAMESITE),
   } as const;
 
   const probe = await probeDatabase();
@@ -67,6 +74,10 @@ export async function GET() {
 
   const ok = probe.query === "ok" && probe.schema && env.AUTH_SECRET === "set";
 
+  if (cookie.sameSite === "lax" && process.env.COOKIE_SAMESITE?.toLowerCase() === "none") {
+    warnings.push("COOKIE_SAMESITE=none was requested but this deployment is not HTTPS; using lax.");
+  }
+
   return NextResponse.json(
     {
       ok,
@@ -77,6 +88,18 @@ export async function GET() {
         sessions,
       },
       warnings,
+      // Public by design: these are the deployment's own hosts and flags, not secrets.
+      cors: {
+        sameOriginOnly: allowedOrigins.length === 0,
+        allowedOrigins,
+        frameAncestors: process.env.FRAME_ANCESTORS?.trim() || "'self'",
+      },
+      cookies: {
+        name: "dnx_session",
+        httpOnly: true,
+        sameSite: cookie.sameSite,
+        secure: cookie.secure,
+      },
       runtime: {
         node: process.version,
         env: process.env.NODE_ENV ?? "unknown",

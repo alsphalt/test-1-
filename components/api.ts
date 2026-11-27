@@ -21,11 +21,27 @@ type ErrorBody = { error?: { code?: string; message?: string; details?: unknown;
  * Same-origin by default. Set NEXT_PUBLIC_API_BASE only when the UI is deployed
  * apart from the API; that origin must also be in the server's ALLOWED_ORIGINS.
  */
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || "").replace(/\/$/, "");
+/**
+ * Resolved per call: if NEXT_PUBLIC_API_BASE points at this same origin it is
+ * ignored, so the request stays same-origin and never enters CORS at all.
+ */
+function apiBase(): string {
+  const configured = (process.env.NEXT_PUBLIC_API_BASE || "").trim().replace(/\/$/, "");
+  if (!configured) return "";
+  if (typeof window !== "undefined") {
+    try {
+      if (new URL(configured).origin === window.location.origin) return "";
+    } catch {
+      return "";
+    }
+  }
+  return configured;
+}
 
 function url(path: string): string {
-  if (!API_BASE) return path;
-  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+  const base = apiBase();
+  if (!base) return path;
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -45,15 +61,16 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       method,
       headers,
       body: payload,
-      credentials: API_BASE ? "include" : "same-origin",
+      credentials: apiBase() ? "include" : "same-origin",
       cache: "no-store",
     });
   } catch {
+    const base = apiBase();
     throw new ApiError(
       0,
       "NETWORK",
-      API_BASE
-        ? `Cannot reach the API at ${API_BASE}. Check the URL, that it is in ALLOWED_ORIGINS, and that HTTPS is used.`
+      base
+        ? `Cannot reach the API at ${base}. The browser may be blocking a cross-origin request: add this page's origin to ALLOWED_ORIGINS on the API, and set COOKIE_SAMESITE=none over HTTPS for the session cookie.`
         : "Cannot reach the API. Check your connection and that the server is running.",
     );
   }

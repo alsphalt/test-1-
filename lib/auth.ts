@@ -15,6 +15,36 @@ export function cookieSameSite(): "lax" | "strict" | "none" {
   return "lax";
 }
 
+/**
+ * Cookie flags that actually work.
+ *
+ * `SameSite=None` is rejected by every modern browser unless the cookie is also
+ * `Secure`, and `Secure` cookies are dropped over plain HTTP. Deriving both from
+ * the same fact (is this deployment HTTPS?) prevents a login that returns 200 but
+ * silently loses its session.
+ */
+export function sessionCookieSecurity(): { sameSite: "lax" | "strict" | "none"; secure: boolean } {
+  const https = process.env.APP_URL?.trim()
+    ? process.env.APP_URL.trim().startsWith("https://")
+    : isProd();
+
+  let sameSite = cookieSameSite();
+  if (sameSite === "none" && !https) {
+    // Downgrade rather than send a cookie the browser will discard.
+    sameSite = "lax";
+    console.warn(
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        level: "warn",
+        event: "cookie.samesite_downgraded",
+        detail: "COOKIE_SAMESITE=none requires HTTPS; using lax for this request.",
+      }),
+    );
+  }
+
+  return { sameSite, secure: https };
+}
+
 
 export const SESSION_COOKIE = "dnx_session";
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -63,24 +93,26 @@ export async function verifySessionToken(token: string): Promise<SessionClaims |
 }
 
 export function setSessionCookie(token: string, expiresAt: Date): void {
+  const { sameSite, secure } = sessionCookieSecurity();
   cookies().set({
     name: SESSION_COOKIE,
     value: token,
     httpOnly: true,
-    sameSite: cookieSameSite(),
-    secure: isProd(),
+    sameSite,
+    secure,
     path: "/",
     expires: expiresAt,
   });
 }
 
 export function clearSessionCookie(): void {
+  const { sameSite, secure } = sessionCookieSecurity();
   cookies().set({
     name: SESSION_COOKIE,
     value: "",
     httpOnly: true,
-    sameSite: cookieSameSite(),
-    secure: isProd(),
+    sameSite,
+    secure,
     path: "/",
     maxAge: 0,
   });
