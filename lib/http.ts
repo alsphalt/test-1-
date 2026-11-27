@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAllowedOrigin } from "./origin";
+import { diagnose } from "./errors";
 import { ZodError } from "zod";
 
 export class ApiError extends Error {
@@ -59,10 +60,17 @@ export function route<Args extends unknown[]>(
           422,
         );
       }
-      console.error("[api] unhandled", err);
+      const diagnosed = diagnose(err);
+      console.error(`[api] ${diagnosed.code} — ${diagnosed.log}`);
       return json(
-        { error: { code: "INTERNAL", message: "Something went wrong. Please try again." } },
-        500,
+        {
+          error: {
+            code: diagnosed.code,
+            message: diagnosed.message,
+            hint: diagnosed.hint ?? null,
+          },
+        },
+        diagnosed.status,
       );
     }
   };

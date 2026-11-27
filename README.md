@@ -253,6 +253,36 @@ signup works on preview deployments without extra configuration. A blocked
 origin returns `403 CROSS_ORIGIN` with the exact fix in the message;
 `OPTIONS` preflights are answered by `middleware.ts`.
 
+
+## "Something went wrong. Please try again." on login
+
+That string was the catch-all 500. The API now names the failing component
+instead. Open `/api/health` on the deployment first — it reports, without
+exposing any secret:
+
+- `env.AUTH_SECRET`: `set` / `missing` / `too_short`
+- `env.DATABASE_URL`, `env.DIRECT_URL`, `env.APP_URL`
+- `database.reachable` and `database.schema` (plus a safe `accounts` count)
+- `warnings[]` with the exact fix
+
+| `/api/health` says | Cause | Fix |
+| --- | --- | --- |
+| `AUTH_SECRET: missing` or `too_short` | Session cookies cannot be signed | Set `AUTH_SECRET` to 32+ random chars (`openssl rand -base64 48`), redeploy |
+| `database.reachable: false` | Wrong/paused database, or `DATABASE_URL` absent | Check the Neon/Supabase project is running and the pooled URL is set for **Production** |
+| `database.schema: false` | Tables missing | `npx prisma migrate deploy` with `DATABASE_URL`/`DIRECT_URL` pointed at production |
+| `ok: true` but login still fails | Credentials, or the cookie is dropped | Wrong password returns `401 INVALID_CREDENTIALS`; a dropped cookie means `APP_URL` is `http://` in production or the UI/API are on different origins |
+
+Login errors are now distinguishable: `401 INVALID_CREDENTIALS`,
+`403 ACCOUNT_SUSPENDED`, `422 VALIDATION_ERROR`, `503 SERVER_MISCONFIGURED`,
+`503 DATABASE_UNAVAILABLE`, `503 DATABASE_SCHEMA_MISSING`, `429 RATE_LIMITED`.
+Raw errors stay in the server logs; secrets never reach the response.
+
+Run the auth smoke test against any deployment:
+
+```bash
+E2E_BASE=https://your-app.vercel.app node scripts/e2e-auth.mjs
+```
+
 ## API surface
 
 | Method | Path | Auth |
@@ -271,6 +301,7 @@ origin returns `403 CROSS_ORIGIN` with the exact fix in the message;
 | POST/DELETE | `/api/integrations/:id/test`, `/api/integrations/:id` | session |
 | GET | `/api/admin/stats`, `/api/admin/users`, `/api/admin/audit` | admin |
 | PATCH/DELETE | `/api/admin/users/:id` | admin |
+| GET | `/api/health` | public (no secrets) |
 | GET | `/api/events` | session (SSE) |
 | GET | `/api/setup/state` | session |
 | POST | `/api/setup/unlock`, `/api/setup/lock`, `/api/setup/activate` | session |
@@ -287,6 +318,7 @@ npm run build && npm run start -- -p 3210
 node scripts/e2e.mjs        # core platform
 node scripts/e2e-setup.mjs  # Darknote Setup
 node scripts/e2e-cors.mjs   # origins / signup
+node scripts/e2e-auth.mjs   # register / login / logout / persistence
 ```
 
 `npm run e2e` exercises registration validation, duplicate emails, session issuance, profile updates, bot create → code → redeem → single-use enforcement → heartbeat → logs, file upload/download/delete, SSRF rejection, encrypted integration storage + live test, RBAC, admin suspension/reactivation, persistence across logout, SSE `ready`/`sync` frames, logout, and WhatsApp session ownership/validation/restart rules. Latest run: **60/60 + 27/27 + 10/10**, plus **18/18** worker checks, the bot repository's own **174** tests and Playwright passes (desktop + mobile) with zero console errors.

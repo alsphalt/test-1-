@@ -1,0 +1,165 @@
+import { Prisma } from "@prisma/client";
+
+/**
+ * Turns infrastructure failures into actionable API errors.
+ *
+ * The old behaviour collapsed every unexpected exception into
+ * "Something went wrong. Please try again.", which made a missing AUTH_SECRET
+ * indistinguishable from an unreachable database. These messages name the
+ * failing component and the fix; they never include secrets, connection
+ * strings, query text or stack traces.
+ */
+
+export type Diagnosed = {
+  status: number;
+  code: string;
+  message: string;
+  /** Safe, non-secret hint for the deployment operator. */
+  hint?: string;
+  /** What to print server-side (the raw error is logged separately). */
+  log: string;
+};
+
+const PRISMA_UNREACHABLE = new Set([
+  "P1000", // authentication failed
+  "P1001", // cannot reach database server
+  "P1002", // timed out
+  "P1003", // database does not exist
+  "P1008", // operation timed out
+  "P1010", // access denied
+  "P1017", // server closed the connection
+  "P2024", // pool timeout
+]);
+
+const PRISMA_SCHEMA = new Set([
+  "P2021", // table does not exist
+  "P2022", // column does not exist
+  "P3005", // database schema is not empty (migrations out of sync)
+  "P3009", // failed migrations
+]);
+
+function configError(message: string): Diagnosed | null {
+  if (/AUTH_SECRET is not configured/i.test(message)) {
+    return {
+      status: 503,
+      code: "SERVER_MISCONFIGURED",
+      message: "The server is missing AUTH_SECRET, so it cannot sign session cookies.",
+      hint: "Set AUTH_SECRET (32+ random characters) in the deployment environment, then redeploy.",
+      log: "AUTH_SECRET missing",
+    };
+  }
+  if (/AUTH_SECRET must be at least 32 characters/i.test(message)) {
+    return {
+      status: 503,
+      code: "SERVER_MISCONFIGURED",
+      message: "AUTH_SECRET is too short for production (minimum 32 characters).",
+      hint: "Generate one with: openssl rand -base64 48",
+      log: "AUTH_SECRET too short",
+    };
+  }
+  if (/ENCRYPTION_KEY is not configured/i.test(message)) {
+    return {
+      status: 503,
+      code: "SERVER_MISCONFIGURED",
+      message: "The server is missing ENCRYPTION_KEY, so stored secrets cannot be decrypted.",
+      hint: "Set ENCRYPTION_KEY to 32 bytes as 64 hex characters, then redeploy.",
+      log: "ENCRYPTION_KEY missing",
+    };
+  }
+  if (/ENCRYPTION_KEY must be 32 bytes/i.test(message)) {
+    return {
+      status: 503,
+      code: "SERVER_MISCONFIGURED",
+      message: "ENCRYPTION_KEY is not 32 bytes.",
+      hint: "Generate one with: openssl rand -hex 32",
+      log: "ENCRYPTION_KEY invalid",
+    };
+  }
+  return null;
+}
+
+export function diagnose(err: unknown): Diagnosed {
+  const raw = err instanceof Error ? err.message : String(err);
+  const fromConfig = configError(raw);
+  if (fromConfig) return fromConfig;
+
+  if (err instanceof Prisma.PrismaClientInitializationError) {
+    return {
+      status: 503,
+      code: "DATABASE_UNAVAILABLE",
+      message: "The server cannot reach its database.",
+      hint: "Check DATABASE_URL (and DIRECT_URL) in the deployment environment. A Neon/Supabase project that is paused or a missing variable produces this.",
+      log: `PrismaClientInitializationError: ${raw}`,
+    };
+  }
+
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    if (PRISMA_UNREACHABLE.has(err.code)) {
+      return {
+        status: 503,
+        code: "DATABASE_UNAVAILABLE",
+        message: "The server cannot reach its database.",
+        hint: `Prisma ${err.code}. Verify DATABASE_URL, that the database is running, and that this deployment's IP is allowed.`,
+        log: `Prisma ${err.code}: ${raw}`,
+      };
+    }
+    if (PRISMA_SCHEMA.has(err.code)) {
+      return {
+        status: 503,
+        code: "DATABASE_SCHEMA_MISSING",
+        message: "The database is connected but its tables are missing or out of date.",
+        hint: "Run `npx prisma migrate deploy` against DATABASE_URL (DIRECT_URL for Neon), then reload.",
+        log: `Prisma ${err.code}: ${raw}`,
+      };
+    }
+    if (err.code === "P2002") {
+      return {
+        status: 409,
+        code: "ALREADY_EXISTS",
+        message: "That record already exists.",
+        log: `Prisma P2002: ${raw}`,
+      };
+    }
+    if (err.code === "P2025") {
+      return {
+        status: 404,
+        code: "NOT_FOUND",
+        message: "That record no longer exists.",
+        log: `Prisma P2025: ${raw}`,
+      };
+    }
+    return {
+      status: 500,
+      code: "DATABASE_ERROR",
+      message: "The database rejected the request.",
+      hint: `Prisma ${err.code}. Check the server logs for the full error.`,
+      log: `Prisma ${err.code}: ${raw}`,
+    };
+  }
+
+  if (err instanceof Prisma.PrismaClientValidationError) {
+    return {
+      status: 500,
+      code: "DATABASE_QUERY_INVALID",
+      message: "The server sent an invalid database query.",
+      hint: "This is a code/schema mismatch — redeploy after `prisma generate`.",
+      log: `PrismaClientValidationError: ${raw.slice(0, 800)}`,
+    };
+  }
+
+  if (err instanceof Prisma.PrismaClientRustPanicError) {
+    return {
+      status: 500,
+      code: "DATABASE_ENGINE_ERROR",
+      message: "The database engine crashed while handling the request.",
+      log: `PrismaClientRustPanicError: ${raw}`,
+    };
+  }
+
+  return {
+    status: 500,
+    code: "INTERNAL",
+    message: "Something went wrong. Please try again.",
+    log: raw,
+  };
+}

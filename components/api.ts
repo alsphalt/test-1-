@@ -4,16 +4,18 @@ export class ApiError extends Error {
   status: number;
   code: string;
   details?: unknown;
+  hint?: string;
 
-  constructor(status: number, code: string, message: string, details?: unknown) {
+  constructor(status: number, code: string, message: string, details?: unknown, hint?: string) {
     super(message);
     this.status = status;
     this.code = code;
     this.details = details;
+    this.hint = hint;
   }
 }
 
-type ErrorBody = { error?: { code?: string; message?: string; details?: unknown } };
+type ErrorBody = { error?: { code?: string; message?: string; details?: unknown; hint?: string | null } };
 
 /**
  * Same-origin by default. Set NEXT_PUBLIC_API_BASE only when the UI is deployed
@@ -70,6 +72,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       err.error?.code || "REQUEST_FAILED",
       err.error?.message || `Request failed (${res.status})`,
       err.error?.details,
+      err.error?.hint ?? undefined,
     );
   }
 
@@ -84,7 +87,8 @@ export const api = {
 };
 
 export function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
+  // Operator-facing: a backend hint names the missing variable or migration.
+  if (err instanceof ApiError) return err.hint ? `${err.message} ${err.hint}` : err.message;
   if (err instanceof Error) return err.message;
   return "Something went wrong.";
 }
