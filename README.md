@@ -80,7 +80,7 @@ ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='strong-pass-1' npm run db:seed
 ## Deploy to Vercel
 
 1. **Database** — create a Postgres instance (Vercel Postgres/Neon/Supabase) and copy both the pooled and direct connection strings.
-2. **Project** — import the repo (framework preset: Next.js; build command `npm run vercel-build`, already in `vercel.json`). That command runs `prisma generate`, applies pending migrations, then `next build`, so the schema cannot drift behind the deployed code. A migration *history* problem on an already-correct database (for example tables created with `db push`) can no longer block a release: `db-deploy --advisory` re-checks the live schema with `db-verify --gate` and continues only when nothing the app needs is missing.
+2. **Project** — import the repo (framework preset: Next.js; build command `npm run vercel-build`, already in `vercel.json`). That command runs `prisma generate` then `next build` — exactly what CI verifies — and needs no database access. Schema work is deliberately **not** part of the build: a build step that talks to the database either needs credentials the platform does not expose to builds, or turns a migration/bookkeeping problem into "no deployment at all", which is how a correctly configured project silently keeps serving an old build. Apply schema changes with `npm run db:release` (deploy + gate) from a place that holds the runtime URL, or run it once before the first deploy.
 3. **Environment variables** (Production + Preview):
 
    | Name | Value |
