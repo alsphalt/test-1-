@@ -223,6 +223,18 @@ if (process.argv.includes("--selftest")) {
 /* ---------------------------------- main ---------------------------------- */
 
 if (!process.env.DATABASE_URL?.trim() && !process.env.DIRECT_URL?.trim()) {
+  if (advisory) {
+    // A build must never depend on a runtime-only variable. Vercel does not
+    // expose every variable to the build step (Sensitive values, and anything
+    // scoped to the runtime), so an absent URL here is expected — not a reason
+    // to block a deployment of code that runs against an already-migrated
+    // database. Migrations remain available as `npm run db:deploy`.
+    say("\u00b7 DATABASE_URL is not available to this build — skipping migrations.");
+    say("  A Sensitive/runtime-scoped DATABASE_URL is not exposed to build steps.");
+    say("  The deployment can still serve an already-migrated database; apply schema");
+    say("  changes separately with: npm run db:deploy && npm run db:verify:gate");
+    process.exit(0);
+  }
   fail("DATABASE_URL is not set", "Set DATABASE_URL (and DIRECT_URL) for the scope you are deploying.");
 }
 

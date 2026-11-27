@@ -137,6 +137,14 @@ function heading(title) {
 }
 
 if (!url) {
+  if (gate) {
+    // Build-time gating only: the deployment is being produced by an
+    // environment that does not expose the runtime database URL. There is
+    // nothing to compare, and that must not block the release.
+    console.log("DATABASE_URL / DIRECT_URL is not available to this build — skipping the schema gate.");
+    console.log("Run `npm run db:verify` where the runtime URL is available.");
+    process.exit(0);
+  }
   console.error("DATABASE_URL / DIRECT_URL is not set — nothing to verify.");
   console.error("Set it for the deployment scope you want to check (Production vs Preview) and re-run.");
   process.exit(2);
